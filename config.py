@@ -2,6 +2,11 @@
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+# Carrega o .env do repo no import, pra QUALQUER entrypoint (call, doctor) ver a config.
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
 # Audio
 SAMPLE_RATE_IN = 16000    # Silero VAD so aceita 8k/16k; whisper tambem quer 16k
 SAMPLE_RATE_OUT = 24000   # edge-tts
@@ -61,9 +66,9 @@ ECHO_GATE = os.getenv("CALL_ECHO_GATE", "1") not in ("0", "false", "no")
 AEC = os.getenv("CALL_AEC", "0") not in ("0", "false", "no")
 
 # STT (whisper.cpp)
-WHISPER_MODEL = os.getenv(
+WHISPER_MODEL = os.path.expanduser(os.getenv(
     "CALL_WHISPER_MODEL", str(Path.home() / ".cache" / "whisper" / "ggml-small.bin")
-)
+))
 WHISPER_PORT = int(os.getenv("CALL_WHISPER_PORT", "8099"))
 USE_WHISPER_SERVER = os.getenv("CALL_WHISPER_SERVER", "1") not in ("0", "false", "no")
 
