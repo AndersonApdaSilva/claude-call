@@ -2,14 +2,18 @@
 cai pro whisper-cli (recarrega o modelo por fala, ~2s) se o server nao subir.
 """
 import asyncio
-import audioop
 import io
 import os
 import subprocess
 import tempfile
+import warnings
 import wave
 from pathlib import Path
 from typing import AsyncGenerator
+
+with warnings.catch_warnings():  # audioop is fine on 3.12 (pinned); silence its 3.13 notice
+    warnings.simplefilter("ignore", DeprecationWarning)
+    import audioop
 
 import httpx
 from loguru import logger

@@ -4,6 +4,7 @@ Pipecat nao traz edge-tts embutido, entao implementamos um TTSService:
 edge-tts gera MP3 -> ffmpeg decodifica pra PCM s16le mono -> frames de audio raw.
 """
 import asyncio
+import importlib
 import os
 from typing import AsyncGenerator
 
@@ -76,6 +77,14 @@ _PREMIUM_DEFAULTS = {
     "deepgram":   ("aura-2-thalia-en",      None,                "DEEPGRAM_API_KEY"),
 }
 
+_SVC = {
+    "elevenlabs": "pipecat.services.elevenlabs.tts:ElevenLabsTTSService",
+    "cartesia":   "pipecat.services.cartesia.tts:CartesiaTTSService",
+    "openai":     "pipecat.services.openai.tts:OpenAITTSService",
+    "rime":       "pipecat.services.rime.tts:RimeTTSService",
+    "deepgram":   "pipecat.services.deepgram.tts:DeepgramTTSService",
+}
+
 PROVIDERS = ["edge"] + list(_PREMIUM_DEFAULTS)
 
 
@@ -99,18 +108,11 @@ def make_tts(*, provider: str, voice: str | None, rate: str, sample_rate: int,
         raise RuntimeError(f"{p} needs a voice id — set CALL_VOICE to a {p} voice.")
     m = model or def_model
 
-    if p == "elevenlabs":
-        from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
-        return ElevenLabsTTSService(api_key=key, voice_id=v, model=m, sample_rate=sample_rate)
-    if p == "cartesia":
-        from pipecat.services.cartesia.tts import CartesiaTTSService
-        return CartesiaTTSService(api_key=key, voice_id=v, model=m, sample_rate=sample_rate)
-    if p == "openai":
-        from pipecat.services.openai.tts import OpenAITTSService
-        return OpenAITTSService(api_key=key, voice=v, model=m, sample_rate=sample_rate)
-    if p == "rime":
-        from pipecat.services.rime.tts import RimeTTSService
-        return RimeTTSService(api_key=key, voice_id=v, model=m, sample_rate=sample_rate)
-    if p == "deepgram":
-        from pipecat.services.deepgram.tts import DeepgramTTSService
-        return DeepgramTTSService(api_key=key, voice=v, sample_rate=sample_rate)
+    # All Pipecat TTS services share the shape: Service(api_key, sample_rate,
+    # settings=Service.Settings(voice=..., model=...)). Uniform = no deprecations.
+    mod, cls = _SVC[p].split(":")
+    Svc = getattr(importlib.import_module(mod), cls)
+    sargs = {"voice": v}
+    if m:
+        sargs["model"] = m
+    return Svc(api_key=key, sample_rate=sample_rate, settings=Svc.Settings(**sargs))

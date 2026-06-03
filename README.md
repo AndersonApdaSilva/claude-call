@@ -135,6 +135,7 @@ Each turn is one real inference over your session context. Expect a couple secon
 Hands-free voice can't answer permission prompts, so the default `CALL_PERMISSION=--dangerously-skip-permissions` lets the agent run tools / bash / edits **without asking**. That's powerful and potentially destructive. Only use it on machines/projects you trust. To be asked instead, set `CALL_PERMISSION=--permission-mode default` — but the call will stall whenever a prompt appears.
 
 ## Troubleshooting
+- **Check everything first:** `claude-call doctor` — verifies prerequisites, your model and config, and benchmarks STT/TTS latency (tells you exactly what's missing or slow).
 - **It doesn't hear me** → give your terminal app microphone permission (macOS: System Settings → Privacy & Security → Microphone), then restart the call.
 - **`whisper model not found`** → `./scripts/download-model.sh small` (or point `CALL_WHISPER_MODEL` at a ggml file you have).
 - **`whisper-server` not found** → install whisper.cpp (step 1), or set `CALL_WHISPER_SERVER=0` to use `whisper-cli` (slower, no server).
