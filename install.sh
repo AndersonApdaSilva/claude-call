@@ -93,12 +93,15 @@ if [ ! -f "$HOME/.cache/whisper/ggml-${MODEL}.bin" ]; then
   ( cd "$REPO_DIR" && ./scripts/download-model.sh "$MODEL" )
 fi
 
-# --- 6) install the global command ---
-BIN=""
-for d in /usr/local/bin "$HOME/.local/bin"; do
-  if [ -d "$d" ] && [ -w "$d" ]; then BIN="$d"; break; fi
-done
-[ -z "$BIN" ] && { mkdir -p "$HOME/.local/bin"; BIN="$HOME/.local/bin"; }
+# --- 6) install the global command (CLAUDE_CALL_BIN overrides the location) ---
+BIN="${CLAUDE_CALL_BIN:-}"
+if [ -z "$BIN" ]; then
+  for d in /usr/local/bin "$HOME/.local/bin"; do
+    if [ -d "$d" ] && [ -w "$d" ]; then BIN="$d"; break; fi
+  done
+  [ -z "$BIN" ] && BIN="$HOME/.local/bin"
+fi
+mkdir -p "$BIN"
 ln -sf "$REPO_DIR/call.sh" "$BIN/claude-call"
 say "Installed command: $BIN/claude-call"
 case ":$PATH:" in
