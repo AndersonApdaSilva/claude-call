@@ -11,6 +11,13 @@ while [ -h "$SOURCE" ]; do
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 
+# Subcommand: `claude-call config` opens the interactive settings menu
+if [ "${1:-}" = "config" ]; then
+  cd "$SCRIPT_DIR"
+  [ -f .env ] || cp .env.example .env
+  exec uv run python configure.py
+fi
+
 # The session to resume = the directory you called from
 export CALL_CWD="${CALL_CWD:-$PWD}"
 

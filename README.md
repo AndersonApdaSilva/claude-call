@@ -77,7 +77,15 @@ It greets you, **resumes that project's most recent Claude Code session**, and l
 
 The first run downloads a small Silero model and warms the whisper server. The first spoken turn loads your session context (slower; cached after that).
 
-## Config (all optional — `.env` or env vars)
+## Configure
+
+Run the interactive menu — pick your **voice** (with live preview), **speaking style**, language, brain model, echo mode and activation:
+```bash
+claude-call config
+```
+It writes your choices to `.env`. Prefer doing it by hand? Every setting is a plain env var:
+
+### All settings (`.env` or env vars)
 | Var | Default | What |
 |---|---|---|
 | `CALL_LANG` | `en` | Language (en, pt, es, fr, de, it, ja…). Picks a default voice + speech style. |
