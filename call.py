@@ -1,0 +1,93 @@
+"""claude-call — uma ligacao de voz com o seu Claude Code.
+
+Pipeline (Pipecat):
+  mic -> [EchoGate] -> VAD (Silero+SmartTurn) -> whisper (STT local)
+      -> ClaudeBrain (daemon `claude` retomando a SUA sessao) -> edge-tts -> alto-falante
+
+Cerebro = `claude` CLI ja autenticado (sua assinatura). Nao precisa de API key.
+Rodar:  ./call.sh   (ou: uv run python call.py)
+"""
+import asyncio
+
+from dotenv import load_dotenv
+load_dotenv()
+
+from loguru import logger  # noqa: E402
+
+from pipecat.audio.vad.silero import SileroVADAnalyzer  # noqa: E402
+from pipecat.frames.frames import TTSSpeakFrame  # noqa: E402
+from pipecat.pipeline.pipeline import Pipeline  # noqa: E402
+from pipecat.pipeline.runner import PipelineRunner  # noqa: E402
+from pipecat.pipeline.task import PipelineParams, PipelineTask  # noqa: E402
+from pipecat.processors.audio.vad_processor import VADProcessor  # noqa: E402
+from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams  # noqa: E402
+
+import config as C  # noqa: E402
+from brain import ClaudeBrain  # noqa: E402
+from echo_gate import EchoGate  # noqa: E402
+from session import latest_session  # noqa: E402
+from stt import make_stt  # noqa: E402
+from tts import EdgeTTS  # noqa: E402
+
+_FILLERS = {
+    "en": ["One sec.", "Hold on.", "Let me check.", "Give me a moment."],
+    "pt": ["Peraí.", "Deixa eu ver.", "Um segundo.", "Já te falo."],
+    "es": ["Un momento.", "Déjame ver.", "Espera.", "Ya te digo."],
+}
+
+
+async def main():
+    # Sessao: continua a SUA conversa mais recente desse diretorio (o diferencial).
+    session_id = C.SESSION_ID
+    if not session_id and C.CONTINUE:
+        session_id = latest_session(C.CWD)
+    if session_id:
+        logger.info(f"continuando sua sessao do Claude Code: {session_id}")
+    else:
+        logger.info("sessao nova (nenhuma conversa anterior encontrada nesse diretorio)")
+
+    # Transport
+    use_echo_gate = C.ECHO_GATE
+    if C.AEC:
+        from extras_mac_aec import MacAECTransport  # opcional, so macOS
+        transport = MacAECTransport()
+        use_echo_gate = False
+        logger.info("transport: macOS AEC (Voice Processing I/O)")
+    else:
+        transport = LocalAudioTransport(LocalAudioTransportParams(
+            audio_in_enabled=True, audio_out_enabled=True,
+            audio_in_sample_rate=C.SAMPLE_RATE_IN, audio_out_sample_rate=C.SAMPLE_RATE_OUT,
+        ))
+
+    vad = VADProcessor(vad_analyzer=SileroVADAnalyzer())
+
+    stt = await make_stt(model=C.WHISPER_MODEL, language=C.WHISPER_LANG,
+                         port=C.WHISPER_PORT, use_server=C.USE_WHISPER_SERVER)
+
+    brain = ClaudeBrain(
+        voice_rules=C.VOICE_RULES, model=C.MODEL, permission_flag=C.PERMISSION,
+        wake_words=C.WAKE, active_window_secs=C.ACTIVE_WINDOW,
+        fillers=_FILLERS.get(C.LANG[:2], _FILLERS["en"]),
+        session_id=session_id, cwd=C.CWD,
+    )
+
+    tts = EdgeTTS(voice=C.VOICE, rate=C.VOICE_RATE, sample_rate=C.SAMPLE_RATE_OUT)
+
+    stages = [transport.input()]
+    if use_echo_gate:
+        stages.append(EchoGate())
+    stages += [vad, stt, brain, tts, transport.output()]
+    pipeline = Pipeline(stages)
+
+    task = PipelineTask(pipeline, params=PipelineParams(
+        audio_in_sample_rate=C.SAMPLE_RATE_IN, audio_out_sample_rate=C.SAMPLE_RATE_OUT,
+    ))
+    await task.queue_frames([TTSSpeakFrame(C.GREETING)])
+
+    runner = PipelineRunner(handle_sigint=True)
+    logger.info(f"claude-call no ar — voz={C.VOICE}, lang={C.LANG}, modelo={C.MODEL or 'default'}")
+    await runner.run(task)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
