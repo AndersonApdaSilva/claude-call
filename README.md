@@ -142,7 +142,14 @@ Without headphones the mic hears the agent's own voice and loops. Three options:
 - **`CALL_AEC=1`** (macOS only): real hardware AEC via the OS Voice Processing unit (same as FaceTime) → barge-in on speakers, no headphones. Needs `./build.sh` (compiles a small Swift helper) and microphone permission for your terminal. *(Built but validate on your machine — it needs a real audio session.)*
 
 ## Latency
-Each turn is one real inference over your session context. Expect a couple seconds for simple turns (replies stream as it talks), more on tool-heavy turns (it speaks a quick filler so there's no dead air). Use `CALL_MODEL=haiku` for snappier, `opus` for smarter.
+A turn is: **endpointing** (~0.5s of silence to know you're done) → **STT** (~0.3s, resident whisper-server) → **brain** (one inference over your session — the dominant cost) → **TTS** (first audio ~1s on edge; it streams sentence-by-sentence and speaks a quick filler during tool use, so there's no dead air).
+
+To minimize:
+- **`CALL_MODEL=haiku`** — fastest brain (`opus` = smartest, slower). The first turn loads your context; warm turns are much faster.
+- **Premium streaming TTS** — Cartesia is ~0.2s to first audio vs edge's ~1s. `CALL_TTS=cartesia` if latency matters more than the free voice.
+- Free **edge-tts** decodes in streaming mode, so audio starts as soon as the first chunk arrives (not after the whole sentence).
+
+Run `claude-call doctor` to see your real STT/TTS numbers.
 
 ## Security ⚠️
 Hands-free voice can't answer permission prompts, so the default `CALL_PERMISSION=--dangerously-skip-permissions` lets the agent run tools / bash / edits **without asking**. That's powerful and potentially destructive. Only use it on machines/projects you trust. To be asked instead, set `CALL_PERMISSION=--permission-mode default` — but the call will stall whenever a prompt appears.

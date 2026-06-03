@@ -26,41 +26,62 @@ class EdgeTTS(TTSService):
     def can_generate_metrics(self) -> bool:
         return False
 
-    async def _mp3_to_pcm(self, mp3: bytes, rate: int) -> bytes:
-        proc = await asyncio.create_subprocess_exec(
-            "ffmpeg", "-hide_banner", "-loglevel", "error",
-            "-i", "pipe:0", "-f", "s16le", "-acodec", "pcm_s16le",
-            "-ac", "1", "-ar", str(rate), "pipe:1",
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        pcm, err = await proc.communicate(input=mp3)
-        if proc.returncode != 0:
-            raise RuntimeError(f"ffmpeg decode failed: {err.decode(errors='ignore')[:200]}")
-        return pcm
-
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        """Streaming: feed edge-tts mp3 into ffmpeg as it arrives, emit PCM as it
+        decodes — first audio starts in ~hundreds of ms instead of after the whole
+        sentence is generated. `-f mp3` skips format probing so ffmpeg starts at once."""
         logger.debug(f"[edge-tts] {text!r}")
         try:
-            comm = edge_tts.Communicate(text, self._voice, rate=self._rate, pitch=self._pitch)
-            mp3 = bytearray()
-            async for chunk in comm.stream():
-                if chunk["type"] == "audio":
-                    mp3.extend(chunk["data"])
-            if not mp3:
-                yield ErrorFrame("edge-tts returned no audio")
-                return
-            pcm = await self._mp3_to_pcm(bytes(mp3), self.sample_rate)
-            await self.start_ttfb_metrics()
-            yield TTSStartedFrame()
-            frame_bytes = int(self.sample_rate * 0.02) * 2  # ~20ms
-            for i in range(0, len(pcm), frame_bytes):
-                yield TTSAudioRawFrame(audio=pcm[i:i + frame_bytes],
-                                       sample_rate=self.sample_rate, num_channels=1)
-            yield TTSStoppedFrame()
-        except Exception as e:  # noqa: BLE001
-            logger.exception("[edge-tts] error")
-            yield ErrorFrame(f"edge-tts error: {e}")
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "-f", "mp3", "-i", "pipe:0",
+                "-f", "s16le", "-acodec", "pcm_s16le",
+                "-ac", "1", "-ar", str(self.sample_rate), "pipe:1",
+                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        except FileNotFoundError:
+            yield ErrorFrame("ffmpeg not found")
+            return
+
+        async def feed():
+            try:
+                comm = edge_tts.Communicate(text, self._voice, rate=self._rate, pitch=self._pitch)
+                async for chunk in comm.stream():
+                    if chunk["type"] == "audio":
+                        proc.stdin.write(chunk["data"])
+                        await proc.stdin.drain()
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"[edge-tts] stream: {e}")
+            finally:
+                try:
+                    proc.stdin.close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+        feeder = asyncio.create_task(feed())
+        await self.start_ttfb_metrics()
+        yield TTSStartedFrame()
+        frame_bytes = int(self.sample_rate * 0.02) * 2  # ~20ms
+        got = False
+        try:
+            while True:
+                data = await proc.stdout.read(frame_bytes)
+                if not data:
+                    break
+                got = True
+                yield TTSAudioRawFrame(audio=data, sample_rate=self.sample_rate, num_channels=1)
+        finally:
+            if not feeder.done():
+                feeder.cancel()
+            if proc.returncode is None:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+        if not got:
+            yield ErrorFrame("edge-tts produced no audio")
+        yield TTSStoppedFrame()
 
 
 # ---------------------------------------------------------------- providers

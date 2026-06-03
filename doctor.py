@@ -96,24 +96,27 @@ async def main():
         bad(f"Silero VAD failed: {e}")
 
     head("Benchmarks")
-    mp3 = bytearray()
+    pcm = bytearray()
     try:
-        import edge_tts
+        from tts import EdgeTTS
+        from pipecat.frames.frames import TTSAudioRawFrame
+        svc = EdgeTTS(voice=C.EDGE_VOICE, sample_rate=16000)
+        svc._sample_rate = 16000  # 16k mono → feeds whisper directly (no re-decode)
         t = time.time()
-        async for c in edge_tts.Communicate("Testing the voice stack, one two three.", C.EDGE_VOICE).stream():
-            if c["type"] == "audio":
-                mp3.extend(c["data"])
-        edge_ms = (time.time() - t) * 1000
-        (ok if edge_ms < 2500 else warn)(f"edge-tts synth: {edge_ms:.0f} ms (free voice)")
+        first = None
+        async for fr in svc.run_tts("Testing the voice stack, one two three.", "doctor"):
+            if isinstance(fr, TTSAudioRawFrame):
+                if first is None:
+                    first = (time.time() - t) * 1000
+                pcm.extend(fr.audio)
+        if first is not None:
+            (ok if first < 1500 else warn)(f"edge-tts time-to-first-audio: {first:.0f} ms (streaming)")
+        else:
+            warn("edge-tts produced no audio")
     except Exception as e:  # noqa: BLE001
         warn(f"edge-tts failed: {e} (check your internet connection)")
 
-    if mp3 and model.exists() and shutil.which("ffmpeg") and (has_server or has_cli):
-        pcm = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", "pipe:0",
-             "-f", "s16le", "-ac", "1", "-ar", "16000", "pipe:1"],
-            input=bytes(mp3), capture_output=True,
-        ).stdout
+    if pcm and model.exists() and (has_server or has_cli):
         from stt import _wav
         if has_server:
             try:
@@ -123,7 +126,7 @@ async def main():
                 t = time.time()
                 async with httpx.AsyncClient(timeout=30) as cl:
                     r = await cl.post(base + "/inference",
-                                      files={"file": ("a.wav", _wav(pcm), "audio/wav")},
+                                      files={"file": ("a.wav", _wav(bytes(pcm)), "audio/wav")},
                                       data={"language": C.WHISPER_LANG, "response_format": "json",
                                             "no_timestamps": "true"})
                 ms = (time.time() - t) * 1000
@@ -136,7 +139,7 @@ async def main():
             import tempfile, wave
             f = tempfile.NamedTemporaryFile(suffix=".wav", delete=False); f.close()
             with wave.open(f.name, "wb") as w:
-                w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(pcm)
+                w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(bytes(pcm))
             t = time.time()
             out = subprocess.run(["whisper-cli", "-m", str(model), "-f", f.name,
                                   "-l", C.WHISPER_LANG, "-nt", "-np"], capture_output=True)
