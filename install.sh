@@ -112,6 +112,13 @@ if ! have claude; then
   warn "Then run 'claude' once and log in. claude-call uses your subscription — no API key."
 fi
 
+# --- 8) verify + benchmark (so you see 'all green' right away) ---
+if [ "${CLAUDE_CALL_NO_DOCTOR:-}" != "1" ]; then
+  echo
+  say "Verifying your setup..."
+  ( cd "$REPO_DIR" && CALL_WHISPER_MODEL="$HOME/.cache/whisper/ggml-${MODEL}.bin" uv run python doctor.py ) || true
+fi
+
 echo
 say "Done! 🎉  Start a call from any project you've used with Claude Code:"
 echo "      cd ~/your-project && claude-call"

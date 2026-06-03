@@ -96,16 +96,19 @@ async def main():
         bad(f"Silero VAD failed: {e}")
 
     head("Benchmarks")
-    import edge_tts
-    t = time.time()
     mp3 = bytearray()
-    async for c in edge_tts.Communicate("Testing the voice stack, one two three.", C.EDGE_VOICE).stream():
-        if c["type"] == "audio":
-            mp3.extend(c["data"])
-    edge_ms = (time.time() - t) * 1000
-    (ok if edge_ms < 2500 else warn)(f"edge-tts synth: {edge_ms:.0f} ms (free voice)")
+    try:
+        import edge_tts
+        t = time.time()
+        async for c in edge_tts.Communicate("Testing the voice stack, one two three.", C.EDGE_VOICE).stream():
+            if c["type"] == "audio":
+                mp3.extend(c["data"])
+        edge_ms = (time.time() - t) * 1000
+        (ok if edge_ms < 2500 else warn)(f"edge-tts synth: {edge_ms:.0f} ms (free voice)")
+    except Exception as e:  # noqa: BLE001
+        warn(f"edge-tts failed: {e} (check your internet connection)")
 
-    if model.exists() and shutil.which("ffmpeg") and (has_server or has_cli):
+    if mp3 and model.exists() and shutil.which("ffmpeg") and (has_server or has_cli):
         pcm = subprocess.run(
             ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", "pipe:0",
              "-f", "s16le", "-ac", "1", "-ar", "16000", "pipe:1"],
