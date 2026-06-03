@@ -49,7 +49,7 @@ export PATH="$PWD/build/bin:$PATH"   # so whisper-server / whisper-cli are found
 
 ### 2. Get claude-call
 ```bash
-git clone <repo-url> claude-call
+git clone https://github.com/caiovicentino/claude-call
 cd claude-call
 ./install.sh        # checks prereqs, installs python deps, downloads a whisper model
 ```
