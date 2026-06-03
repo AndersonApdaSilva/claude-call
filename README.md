@@ -1,5 +1,7 @@
 # claude-call 📞
 
+![license: MIT](https://img.shields.io/badge/license-MIT-green) ![python 3.12](https://img.shields.io/badge/python-3.12-blue) ![macOS · Linux](https://img.shields.io/badge/os-macOS%20%C2%B7%20Linux-lightgrey) ![install: one line](https://img.shields.io/badge/install-one--line-orange)
+
 **Talk to your Claude Code by voice — a real phone call with your terminal agent.**
 
 Not a generic voice assistant. `claude-call` is voice I/O bolted onto **your actual Claude Code session** — same skills, MCP servers, memory, and context. You launch it from a project, it *resumes the conversation you were just having there*, and you keep going by voice. It can read files, run tools, edit code, post to your integrations — everything your Claude Code can do — because the brain **is** your Claude Code.
@@ -25,7 +27,7 @@ Every other voice agent gives you a fresh, context-less assistant. This one **co
 ```bash
 curl -fsSL https://raw.githubusercontent.com/caiovicentino/claude-call/main/install.sh | bash
 ```
-This installs everything — uv, ffmpeg, whisper.cpp, portaudio, the repo, a speech model — and a global `claude-call` command. Then, from any project: `claude-call`.
+This installs everything — uv, ffmpeg, whisper.cpp, portaudio, the repo, a speech model — and a global `claude-call` command. It finishes by running `claude-call doctor`, so you immediately see **all green** plus a quick latency benchmark. Then, from any project: `claude-call`.
 
 You still need **[Claude Code](https://docs.claude.com/claude-code)** installed and logged in (it's the brain — no API key). macOS also needs [Homebrew](https://brew.sh). Prefer to do it by hand? Follow the step-by-step below.
 
@@ -77,6 +79,13 @@ It greets you, **resumes that project's most recent Claude Code session**, and l
 
 The first run downloads a small Silero model and warms the whisper server. The first spoken turn loads your session context (slower; cached after that).
 
+## Commands
+| Command | What it does |
+|---|---|
+| `claude-call` | Start a voice call — resumes the Claude Code session in the current folder. |
+| `claude-call config` | Interactive menu: voice (with live preview), style, language, model, echo, TTS provider. |
+| `claude-call doctor` | Check prerequisites + model + config, and benchmark STT/TTS latency. |
+
 ## Configure
 
 Run the interactive menu — pick your **voice** (with live preview), **speaking style**, language, brain model, echo mode and activation:
@@ -89,7 +98,9 @@ It writes your choices to `.env`. Prefer doing it by hand? Every setting is a pl
 | Var | Default | What |
 |---|---|---|
 | `CALL_LANG` | `en` | Language (en, pt, es, fr, de, it, ja…). Picks a default voice + speech style. |
-| `CALL_VOICE` | per-lang | Any [edge-tts voice](https://github.com/rany2/edge-tts). |
+| `CALL_VOICE` | per-lang | Any [edge-tts voice](https://github.com/rany2/edge-tts), or a voice id for a premium provider. |
+| `CALL_VOICE_RATE` | `+0%` | Speaking speed (edge only). |
+| `CALL_TTS` | `edge` | Voice provider — `edge` (free) or premium (see [Premium voices](#premium-voices-optional-bring-your-own-key)). |
 | `CALL_MODEL` | your default | `opus` / `sonnet` / `haiku`. Bigger = smarter & slower. |
 | `CALL_CONTINUE` | `1` | Resume your most recent Claude Code session in `CALL_CWD`. |
 | `CALL_CWD` | where you ran it | Which project's session to resume. |
@@ -97,6 +108,8 @@ It writes your choices to `.env`. Prefer doing it by hand? Every setting is a pl
 | `CALL_ECHO_GATE` | `1` | Mute mic while it speaks (use on speakers). `0` = barge-in (use headphones). |
 | `CALL_AEC` | `0` | macOS hardware echo cancellation → barge-in without headphones (see below). |
 | `CALL_PERMISSION` | `--dangerously-skip-permissions` | See **Security**. |
+
+_Full list (STT model & port, greeting, active window, premium keys) is in [`.env.example`](.env.example)._
 
 ## Premium voices (optional, bring your own key)
 Free **edge-tts** is the default and sounds great. If you want the newest, most realistic voices and don't mind paying the provider, plug in an API key:
@@ -148,7 +161,7 @@ Hands-free voice can't answer permission prompts, so the default `CALL_PERMISSIO
 The brain is **not** a daemon that "thinks" continuously. LLMs are stateless: every spoken turn triggers one fresh inference over your conversation, run on Anthropic's servers — exactly what happens when you type in Claude Code. `claude-call` keeps **one `claude` process alive** for the call (stream-json in/out, `--resume <your session>`), so context stays warm and replies stream — but it's a warm, persistent *session*, not a continuous consciousness.
 
 ## Files
-`call.py` (pipeline) · `brain.py` (claude daemon) · `stt.py` (whisper) · `tts.py` (edge-tts) · `echo_gate.py` · `session.py` (finds your session) · `config.py` · `aec_bridge.swift` + `extras_mac_aec.py` (optional macOS AEC).
+`call.py` (pipeline) · `brain.py` (claude daemon) · `stt.py` (whisper-server/cli) · `tts.py` (edge-tts + premium providers) · `echo_gate.py` · `session.py` (finds your session) · `config.py` · `configure.py` (settings menu) · `doctor.py` (setup check + benchmark) · `install.sh` · `aec_bridge.swift` + `extras_mac_aec.py` (optional macOS AEC).
 
 ## Credits
 Built on [Pipecat](https://github.com/pipecat-ai/pipecat), [whisper.cpp](https://github.com/ggerganov/whisper.cpp), [edge-tts](https://github.com/rany2/edge-tts), and [Claude Code](https://docs.claude.com/claude-code).
