@@ -148,6 +148,10 @@ async def main():
             warn(f"STT whisper-cli (reloads model each turn): {ms:.0f} ms — install whisper-server to make this ~3x faster")
             dim(f'heard: "{" ".join(out.stdout.decode(errors="ignore").split())}"')
 
+    head("Cost")
+    dim("headless `claude -p` draws from your plan's monthly agent credit at API rates (since 2026-06-15)")
+    dim("cheaper: CALL_MODEL=haiku + CALL_CONTINUE=0 — see README → Cost & billing")
+
     head("Verdict")
     if R_["fail"]:
         bad(f"{R_['fail']} problem(s) — fix the ✗ above before calling.")

@@ -16,12 +16,36 @@ Not a generic voice assistant. `claude-call` is voice I/O bolted onto **your act
 ```
 
 - **Local ears**: whisper.cpp, offline, ~0.6s/utterance (resident server).
-- **Your brain**: the `claude` CLI you're already logged into — **no API key, no extra cost** beyond your subscription, all your skills/MCP/context.
+- **Your brain**: the `claude` CLI you're already logged into — no separate API key to manage, all your skills/MCP/context. (It does cost — headless usage is billed; see [Cost & billing](#cost--billing).)
 - **Free voice**: Microsoft edge-tts, many languages — or plug a premium API (ElevenLabs, Cartesia, OpenAI, Rime, Deepgram) if you want.
 - **One warm process**: the brain runs as a persistent daemon for the whole call — context stays cached, replies stream as it talks.
 
 ## Why it's different
 Every other voice agent gives you a fresh, context-less assistant. This one **continues your session**. Ask it "where were we?" and it knows — because it's literally the same conversation, reached through a microphone instead of a keyboard.
+
+## Cost & billing
+**Read this before you rely on it.** The brain is `claude -p` (Claude Code's **headless** mode), and headless usage is billed differently from interactive use:
+
+- **Interactive** Claude Code (you typing in the terminal/IDE) is covered by your flat Pro/Max plan.
+- **Headless `claude -p`** — what claude-call uses — is **not** flat. **As of June 15, 2026**, Anthropic moved `claude -p`, the Agent SDK, GitHub Actions and third-party apps to a **separate monthly agent credit**, charged at standard **API rates**:
+
+  | Plan | Monthly agent credit |
+  |---|---|
+  | Pro | $20 |
+  | Max 5× | $100 |
+  | Max 20× | $200 |
+
+  When that credit runs out, automated calls **stop** unless you enable overflow (pay-as-you-go) billing.
+
+So **a voice call costs real money** (API token rates) out of that credit. You don't set up a separate API key — it uses your Claude Code login — but it is **not** "free on top of your subscription."
+
+**Keep it cheap:**
+- `CALL_MODEL=haiku` — the cheapest brain.
+- `CALL_CONTINUE=0` — start a fresh session instead of resuming a big one (far fewer input tokens per turn). You lose "continue your session," but it's much cheaper.
+- Fewer, longer calls amortize the prompt cache (warm turns cost less than many cold starts).
+- Want predictable pay-as-you-go instead? Put `ANTHROPIC_API_KEY=...` in `.env` and `claude -p` bills that directly (no agent-credit cap/stop).
+
+Sources: [Anthropic ends flat-rate agent access, June 15 2026](https://www.techtimes.com/articles/317625/20260602/anthropic-ends-subscription-subsidy-agents-june-15-credit-pool-replaces-flat-rate-access.htm) · [Use Claude Code with Pro/Max](https://support.claude.com/en/articles/11145838-use-claude-code-with-your-pro-or-max-plan).
 
 ## Quick install (one command)
 ```bash
@@ -48,7 +72,7 @@ You need four things on your machine:
 brew install uv ffmpeg whisper-cpp portaudio
 ```
 
-> ⚠️ **Claude Code must be logged in.** Run `claude` once and sign in. That's the brain — claude‑call uses your existing subscription, **no API key**.
+> ⚠️ **Claude Code must be logged in.** Run `claude` once and sign in — that's the brain, no separate API key to set up. Heads up: headless use is billed (see [Cost & billing](#cost--billing)).
 
 **Linux whisper.cpp** (if there's no package): build it and put its binaries on your `PATH`:
 ```bash
@@ -165,7 +189,7 @@ Hands-free voice can't answer permission prompts, so the default `CALL_PERMISSIO
 - **Python 3.13 error** → claude-call pins Python 3.12 via `.python-version` (3.13 removed the `audioop` module). `uv` fetches 3.12 automatically.
 
 ## How it works (the honest version)
-The brain is **not** a daemon that "thinks" continuously. LLMs are stateless: every spoken turn triggers one fresh inference over your conversation, run on Anthropic's servers — exactly what happens when you type in Claude Code. `claude-call` keeps **one `claude` process alive** for the call (stream-json in/out, `--resume <your session>`), so context stays warm and replies stream — but it's a warm, persistent *session*, not a continuous consciousness.
+The brain is **not** a daemon that "thinks" continuously. LLMs are stateless: every spoken turn triggers one fresh inference over your conversation, run on Anthropic's servers — exactly what happens when you type in Claude Code. `claude-call` keeps **one `claude` process alive** for the call (stream-json in/out, `--resume <your session>`), so context stays warm and replies stream — but it's a warm, persistent *session*, not a continuous consciousness. (One catch: typing in Claude Code is covered by your flat plan, but the headless `claude -p` this uses is billed separately — see [Cost & billing](#cost--billing).)
 
 ## Files
 `call.py` (pipeline) · `brain.py` (claude daemon) · `stt.py` (whisper-server/cli) · `tts.py` (edge-tts + premium providers) · `echo_gate.py` · `session.py` (finds your session) · `config.py` · `configure.py` (settings menu) · `doctor.py` (setup check + benchmark) · `install.sh` · `aec_bridge.swift` + `extras_mac_aec.py` (optional macOS AEC).
