@@ -21,6 +21,14 @@ Not a generic voice assistant. `claude-call` is voice I/O bolted onto **your act
 ## Why it's different
 Every other voice agent gives you a fresh, context-less assistant. This one **continues your session**. Ask it "where were we?" and it knows — because it's literally the same conversation, reached through a microphone instead of a keyboard.
 
+## Quick install (one command)
+```bash
+curl -fsSL https://raw.githubusercontent.com/caiovicentino/claude-call/main/install.sh | bash
+```
+This installs everything — uv, ffmpeg, whisper.cpp, portaudio, the repo, a speech model — and a global `claude-call` command. Then, from any project: `claude-call`.
+
+You still need **[Claude Code](https://docs.claude.com/claude-code)** installed and logged in (it's the brain — no API key). macOS also needs [Homebrew](https://brew.sh). Prefer to do it by hand? Follow the step-by-step below.
+
 ## Step-by-step (from zero)
 
 ### 1. Install the prerequisites
@@ -117,3 +125,8 @@ The brain is **not** a daemon that "thinks" continuously. LLMs are stateless: ev
 Built on [Pipecat](https://github.com/pipecat-ai/pipecat), [whisper.cpp](https://github.com/ggerganov/whisper.cpp), [edge-tts](https://github.com/rany2/edge-tts), and [Claude Code](https://docs.claude.com/claude-code).
 
 Created by **Caio Vicentino**. MIT licensed.
+
+---
+
+### 🛠️ Built with [Cultura Builder](https://culturabuilder.com)
+**A maior comunidade de builders da América Latina** — turning non-technical people into AI builders. **7,900+ builders**, 1 year strong, everything built 100% with AI. [**Come build with us → culturabuilder.com**](https://culturabuilder.com)
