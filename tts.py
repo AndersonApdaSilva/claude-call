@@ -4,6 +4,7 @@ Pipecat nao traz edge-tts embutido, entao implementamos um TTSService:
 edge-tts gera MP3 -> ffmpeg decodifica pra PCM s16le mono -> frames de audio raw.
 """
 import asyncio
+import os
 from typing import AsyncGenerator
 
 import edge_tts
@@ -59,3 +60,57 @@ class EdgeTTS(TTSService):
         except Exception as e:  # noqa: BLE001
             logger.exception("[edge-tts] error")
             yield ErrorFrame(f"edge-tts error: {e}")
+
+
+# ---------------------------------------------------------------- providers
+# Premium TTS via Pipecat's built-in services. Bring your own API key (pay-as-you-go).
+# edge = free (default). Others need CALL_TTS_API_KEY (or the provider's standard env var).
+
+# Voices that are opaque ids (must be set by the user) vs named defaults we can pick.
+_PREMIUM_DEFAULTS = {
+    # provider: (default_voice_or_None, default_model_or_None, env_key_name)
+    "elevenlabs": ("21m00Tcm4TlvDq8ikWAM", "eleven_turbo_v2_5", "ELEVENLABS_API_KEY"),
+    "cartesia":   (None,                    "sonic-2",           "CARTESIA_API_KEY"),
+    "openai":     ("alloy",                 "gpt-4o-mini-tts",   "OPENAI_API_KEY"),
+    "rime":       ("cove",                  "mistv2",            "RIME_API_KEY"),
+    "deepgram":   ("aura-2-thalia-en",      None,                "DEEPGRAM_API_KEY"),
+}
+
+PROVIDERS = ["edge"] + list(_PREMIUM_DEFAULTS)
+
+
+def make_tts(*, provider: str, voice: str | None, rate: str, sample_rate: int,
+             api_key: str | None = None, model: str | None = None):
+    """Returns a Pipecat TTS service for the chosen provider.
+    edge = free/local-ish; the rest are paid APIs (bring your own key)."""
+    p = (provider or "edge").lower()
+    if p == "edge":
+        return EdgeTTS(voice=voice or "en-US-AndrewNeural", rate=rate, sample_rate=sample_rate)
+
+    if p not in _PREMIUM_DEFAULTS:
+        raise ValueError(f"unknown CALL_TTS '{provider}'. options: {', '.join(PROVIDERS)}")
+
+    def_voice, def_model, env_key = _PREMIUM_DEFAULTS[p]
+    key = api_key or os.getenv(env_key) or os.getenv("CALL_TTS_API_KEY")
+    if not key:
+        raise RuntimeError(f"{p} needs an API key — set CALL_TTS_API_KEY (or {env_key}).")
+    v = voice or def_voice
+    if v is None:
+        raise RuntimeError(f"{p} needs a voice id — set CALL_VOICE to a {p} voice.")
+    m = model or def_model
+
+    if p == "elevenlabs":
+        from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+        return ElevenLabsTTSService(api_key=key, voice_id=v, model=m, sample_rate=sample_rate)
+    if p == "cartesia":
+        from pipecat.services.cartesia.tts import CartesiaTTSService
+        return CartesiaTTSService(api_key=key, voice_id=v, model=m, sample_rate=sample_rate)
+    if p == "openai":
+        from pipecat.services.openai.tts import OpenAITTSService
+        return OpenAITTSService(api_key=key, voice=v, model=m, sample_rate=sample_rate)
+    if p == "rime":
+        from pipecat.services.rime.tts import RimeTTSService
+        return RimeTTSService(api_key=key, voice_id=v, model=m, sample_rate=sample_rate)
+    if p == "deepgram":
+        from pipecat.services.deepgram.tts import DeepgramTTSService
+        return DeepgramTTSService(api_key=key, voice=v, sample_rate=sample_rate)

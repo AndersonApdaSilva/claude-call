@@ -20,6 +20,9 @@ EXAMPLE = ROOT / ".env.example"
 # Managed keys (others in .env are preserved)
 DEFAULTS = {
     "CALL_LANG": "en",
+    "CALL_TTS": "edge",
+    "CALL_TTS_API_KEY": "",
+    "CALL_TTS_MODEL": "",
     "CALL_VOICE": "",
     "CALL_VOICE_RATE": "+0%",
     "CALL_SYSTEM": "",
@@ -28,6 +31,16 @@ DEFAULTS = {
     "CALL_AEC": "0",
     "CALL_WAKE": "",
     "CALL_GREETING": "",
+}
+
+# provider -> (human label, where to get a key / voices)
+TTS_PROVIDERS = {
+    "edge":       ("edge-tts — free, many languages (default)", ""),
+    "elevenlabs": ("ElevenLabs — most realistic", "https://elevenlabs.io  (voice library + API key)"),
+    "cartesia":   ("Cartesia Sonic — ultra low latency", "https://play.cartesia.ai"),
+    "openai":     ("OpenAI TTS", "voices: alloy, echo, fable, onyx, nova, shimmer"),
+    "rime":       ("Rime — natural conversational", "https://rime.ai"),
+    "deepgram":   ("Deepgram Aura — fast", "https://deepgram.com"),
 }
 
 DEFAULT_VOICE = {
@@ -138,7 +151,45 @@ def edit_language(cfg):
         cfg["CALL_VOICE"] = ""  # reset to language default
 
 
+def edit_provider(cfg):
+    print("\n  Voice provider (TTS):")
+    keys = list(TTS_PROVIDERS)
+    for i, k in enumerate(keys, 1):
+        label, where = TTS_PROVIDERS[k]
+        tag = "  ← current" if cfg.get("CALL_TTS", "edge") == k else ""
+        print(f"   {i}. {label}{tag}")
+        if where:
+            print(f"       {where}")
+    sel = ask("  choose a number: ")
+    if not (sel.isdigit() and 1 <= int(sel) <= len(keys)):
+        return
+    prov = keys[int(sel) - 1]
+    cfg["CALL_TTS"] = prov
+    if prov == "edge":
+        cfg["CALL_TTS_API_KEY"] = ""
+        print("  → free edge-tts. Pick a voice in 'Voice'.")
+        return
+    print(f"\n  {prov} is a paid API — paste your key (stored in .env):")
+    k = ask("  API key: ")
+    if k:
+        cfg["CALL_TTS_API_KEY"] = k
+    v = ask(f"  voice id for {prov} (blank = provider default): ")
+    if v:
+        cfg["CALL_VOICE"] = v
+    m = ask("  model override (blank = default): ")
+    if m:
+        cfg["CALL_TTS_MODEL"] = m
+    print(f"  → {prov} set. (Preview works for edge voices; premium plays on the first call.)")
+
+
 def edit_voice(cfg):
+    if cfg.get("CALL_TTS", "edge") != "edge":
+        prov = cfg["CALL_TTS"]
+        print(f"\n  Voice for {prov}. {TTS_PROVIDERS[prov][1]}")
+        v = ask(f"  voice id [{cfg.get('CALL_VOICE') or 'default'}]: ", cfg.get("CALL_VOICE", ""))
+        if v:
+            cfg["CALL_VOICE"] = v
+        return
     lang2 = _lang2(cfg)
     voices = asyncio.run(_voices_for(lang2))
     if not voices:
@@ -226,26 +277,28 @@ def _summary(cfg):
     act = "open mic" if not cfg["CALL_WAKE"] else f"wake: {cfg['CALL_WAKE']}"
     style = next((l for k, (l, p) in STYLES.items() if p == cfg["CALL_SYSTEM"]), "custom") \
         if cfg["CALL_SYSTEM"] else "natural"
-    return (f"lang={cfg['CALL_LANG']}  voice={_voice(cfg)}  rate={cfg['CALL_VOICE_RATE']}  "
+    prov = cfg.get("CALL_TTS", "edge")
+    voice = _voice(cfg) if prov == "edge" else (cfg.get("CALL_VOICE") or f"{prov} default")
+    return (f"lang={cfg['CALL_LANG']}  tts={prov}  voice={voice}  rate={cfg['CALL_VOICE_RATE']}  "
             f"style={style}  model={cfg['CALL_MODEL'] or 'default'}  audio={echo}  {act}")
 
 
 def main():
     cfg = load()
     actions = {
-        "1": edit_language, "2": edit_voice, "3": edit_rate, "4": edit_style,
-        "5": edit_model, "6": edit_echo, "7": edit_activation,
+        "1": edit_language, "2": edit_provider, "3": edit_voice, "4": edit_rate,
+        "5": edit_style, "6": edit_model, "7": edit_echo, "8": edit_activation,
     }
     while True:
-        print("\n" + "═" * 60)
+        print("\n" + "═" * 64)
         print("  claude-call · config")
         print("  " + _summary(cfg))
-        print("═" * 60)
-        print("  1) Language        5) Brain model")
-        print("  2) Voice (preview) 6) Audio / echo")
-        print("  3) Speaking rate   7) Activation")
-        print("  4) Style           ")
-        print("  s) Save & exit     q) Quit without saving")
+        print("═" * 64)
+        print("  1) Language          5) Style")
+        print("  2) Voice provider    6) Brain model")
+        print("  3) Voice             7) Audio / echo")
+        print("  4) Speaking rate     8) Activation")
+        print("  s) Save & exit       q) Quit without saving")
         sel = ask("  > ")
         if sel is None or sel == "q":
             print("  (no changes saved)")

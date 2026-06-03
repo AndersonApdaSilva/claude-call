@@ -15,7 +15,7 @@ Not a generic voice assistant. `claude-call` is voice I/O bolted onto **your act
 
 - **Local ears**: whisper.cpp, offline, ~0.6s/utterance (resident server).
 - **Your brain**: the `claude` CLI you're already logged into — **no API key, no extra cost** beyond your subscription, all your skills/MCP/context.
-- **Free voice**: Microsoft edge-tts, many languages.
+- **Free voice**: Microsoft edge-tts, many languages — or plug a premium API (ElevenLabs, Cartesia, OpenAI, Rime, Deepgram) if you want.
 - **One warm process**: the brain runs as a persistent daemon for the whole call — context stays cached, replies stream as it talks.
 
 ## Why it's different
@@ -97,6 +97,26 @@ It writes your choices to `.env`. Prefer doing it by hand? Every setting is a pl
 | `CALL_ECHO_GATE` | `1` | Mute mic while it speaks (use on speakers). `0` = barge-in (use headphones). |
 | `CALL_AEC` | `0` | macOS hardware echo cancellation → barge-in without headphones (see below). |
 | `CALL_PERMISSION` | `--dangerously-skip-permissions` | See **Security**. |
+
+## Premium voices (optional, bring your own key)
+Free **edge-tts** is the default and sounds great. If you want the newest, most realistic voices and don't mind paying the provider, plug in an API key:
+
+| `CALL_TTS` | Provider | Get a key / voices |
+|---|---|---|
+| `edge` | edge-tts (free, default) | — |
+| `elevenlabs` | ElevenLabs — most realistic | [elevenlabs.io](https://elevenlabs.io) |
+| `cartesia` | Cartesia Sonic — ultra low latency | [cartesia.ai](https://cartesia.ai) |
+| `openai` | OpenAI TTS | voices: alloy, nova, shimmer… |
+| `rime` | Rime — natural conversational | [rime.ai](https://rime.ai) |
+| `deepgram` | Deepgram Aura — fast | [deepgram.com](https://deepgram.com) |
+
+Pick it in `claude-call config` (it asks for the key + voice), or set in `.env`:
+```bash
+CALL_TTS=elevenlabs
+CALL_TTS_API_KEY=sk-...
+CALL_VOICE=<a voice id from the provider>
+```
+Your key lives only in your local `.env`. No key = it just uses free edge-tts.
 
 ## Modes
 - **Call mode** (default): open mic, no wake word — just talk, like a phone call.

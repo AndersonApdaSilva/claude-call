@@ -18,7 +18,19 @@ _DEFAULT_VOICE = {
     "it": "it-IT-DiegoNeural",
     "ja": "ja-JP-KeitaNeural",
 }
-VOICE = os.getenv("CALL_VOICE") or _DEFAULT_VOICE.get(LANG[:2], "en-US-AndrewNeural")
+# TTS provider: edge (free, default) | elevenlabs | cartesia | openai | rime | deepgram
+TTS = os.getenv("CALL_TTS", "edge").lower()
+TTS_API_KEY = os.getenv("CALL_TTS_API_KEY") or None
+TTS_MODEL = os.getenv("CALL_TTS_MODEL") or None
+
+# Voice: for edge, fall back to a per-language default. For premium providers, leave
+# it as set (a provider voice id) — the factory picks a sensible default if empty.
+EDGE_VOICE = _DEFAULT_VOICE.get(LANG[:2], "en-US-AndrewNeural")  # free fallback voice
+_raw_voice = os.getenv("CALL_VOICE") or None
+if TTS == "edge":
+    VOICE = _raw_voice or EDGE_VOICE
+else:
+    VOICE = _raw_voice
 VOICE_RATE = os.getenv("CALL_VOICE_RATE", "+0%")
 
 # Saudacao inicial por idioma

@@ -27,7 +27,7 @@ from brain import ClaudeBrain  # noqa: E402
 from echo_gate import EchoGate  # noqa: E402
 from session import latest_session  # noqa: E402
 from stt import make_stt  # noqa: E402
-from tts import EdgeTTS  # noqa: E402
+from tts import make_tts  # noqa: E402
 
 _FILLERS = {
     "en": ["One sec.", "Hold on.", "Let me check.", "Give me a moment."],
@@ -71,7 +71,15 @@ async def main():
         session_id=session_id, cwd=C.CWD,
     )
 
-    tts = EdgeTTS(voice=C.VOICE, rate=C.VOICE_RATE, sample_rate=C.SAMPLE_RATE_OUT)
+    try:
+        tts = make_tts(provider=C.TTS, voice=C.VOICE, rate=C.VOICE_RATE,
+                       sample_rate=C.SAMPLE_RATE_OUT, api_key=C.TTS_API_KEY, model=C.TTS_MODEL)
+        if C.TTS != "edge":
+            logger.info(f"TTS: {C.TTS} (premium)")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"TTS '{C.TTS}' unavailable ({e}); falling back to free edge-tts")
+        tts = make_tts(provider="edge", voice=C.EDGE_VOICE, rate=C.VOICE_RATE,
+                       sample_rate=C.SAMPLE_RATE_OUT)
 
     stages = [transport.input()]
     if use_echo_gate:
