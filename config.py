@@ -72,6 +72,10 @@ WHISPER_MODEL = os.path.expanduser(os.getenv(
 WHISPER_PORT = int(os.getenv("CALL_WHISPER_PORT", "8099"))
 USE_WHISPER_SERVER = os.getenv("CALL_WHISPER_SERVER", "1") not in ("0", "false", "no")
 
+# Quanto tempo de SILENCIO antes da call se encerrar sozinha (segundos).
+# "0"/"off" = nunca encerra por inatividade (so Ctrl+C ou "encerrar"). Default 30 min.
+IDLE_TIMEOUT = os.getenv("CALL_IDLE_TIMEOUT", "1800")
+
 
 # Regras de fala (system prompt apensado a cada turno). Mantem a resposta "de call".
 _VOICE_RULES = {

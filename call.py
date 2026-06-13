@@ -87,9 +87,13 @@ async def main():
     stages += [vad, stt, brain, tts, transport.output()]
     pipeline = Pipeline(stages)
 
+    # Idle timeout: por padrao 30 min de silencio; "0"/"off" = nunca encerra sozinha.
+    idle_kwargs = ({"cancel_on_idle_timeout": False}
+                   if C.IDLE_TIMEOUT.strip().lower() in ("0", "off", "none", "")
+                   else {"idle_timeout_secs": float(C.IDLE_TIMEOUT)})
     task = PipelineTask(pipeline, params=PipelineParams(
         audio_in_sample_rate=C.SAMPLE_RATE_IN, audio_out_sample_rate=C.SAMPLE_RATE_OUT,
-    ))
+    ), **idle_kwargs)
     await task.queue_frames([TTSSpeakFrame(C.GREETING)])
 
     runner = PipelineRunner(handle_sigint=True)
