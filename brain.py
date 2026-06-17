@@ -38,11 +38,29 @@ _INTERRUPT_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Intenção de PROGRAMAR -> troca pro modelo/effort forte (Opus xHigh).
-_CODE_RE = re.compile(
-    r"\b(program|c[óo]dig|implementa|refator|conserta|corrig|edita|alter|cria(r)?\s+"
+# MUTAÇÃO real (vai MEXER no código/sistema) -> só ISSO paga o modo code (Opus xHigh +
+# respawn com --resume). Tirei 'debug/bug/fix/erro/analisa' daqui: são ambíguos e quase
+# sempre o pedido é só ENTENDER. Trocar pra code nesses casos = resume pesado = trava.
+_MUTATE_RE = re.compile(
+    r"\b(implementa|refator|conserta|corrig|edita|altera(r)?|substitu|cria(r)?\s+"
     r"(o\s+|um\s+|uma\s+)?(arquivo|fun[çc]|componente|script|classe|m[ée]todo|teste)|"
-    r"deploy|comita|commit|builda|instala|roda\s+o|executa\s+o|debug|bug\b|fix\b)",
+    r"escrev[ae]\s+o|deploy|comita|commit|builda|instala|apaga|remov|delet|renomeia|"
+    r"roda\s+o|executa\s+o)\b",
+    re.IGNORECASE,
+)
+
+# "só pra entender, NÃO executa nada" -> NUNCA entra em code (read-only puro).
+_NO_EXEC_RE = re.compile(
+    r"\b(s[óo]\s+(pra|para)\s+(ver|entender|analis|olhar)|s[óo]\s+analis|apenas\s+analis|"
+    r"n[ãa]o\s+(executa|mexe|mex|altera|muda|edita|faz)|sem\s+(executar|mexer|alterar|"
+    r"mudar|editar|mexe))\b",
+    re.IGNORECASE,
+)
+
+# Investigar/entender (read-only) -> fica no modo ATUAL (rápido), não respawna pro Opus.
+_ANALYZE_RE = re.compile(
+    r"\b(analis|entend|explica|explique|diagnostic|investig|revis|avalia|"
+    r"por\s*qu[eê]|o\s+que\s+|d[áa]\s+uma\s+olhada|olha\s+(o|no|a)|v[êe]\s+(o|se|por))\b",
     re.IGNORECASE,
 )
 
@@ -134,6 +152,8 @@ class ClaudeBrain(FrameProcessor):
         self._last_activity = 0.0    # monotonic do último evento vindo do claude
         self._ignore_utterance = False   # mute decidido no INÍCIO da fala (deixa a atual terminar)
         self._recent_speech: deque = deque(maxlen=30)  # (t, set(palavras)) — anti-eco
+        self._last_text = ""             # último pedido do usuário (pra refazer sozinho no recover)
+        self._retried = False            # já refez este turno? (evita loop recover->refaz->recover)
 
     def _should_answer(self, text: str) -> bool:
         if not self._wake:
@@ -201,7 +221,10 @@ class ClaudeBrain(FrameProcessor):
         except Exception:  # noqa: BLE001
             pass
 
-    async def _send(self, text: str):
+    async def _send(self, text: str, *, is_retry: bool = False):
+        if not is_retry:
+            self._last_text = text   # guarda pro recover refazer; retry não sobrescreve nem rearma
+            self._retried = False
         await self._ensure_proc()
         from sounds import play
         play("heard")           # bip: captei sua fala, vou executar
@@ -420,10 +443,14 @@ class ClaudeBrain(FrameProcessor):
 
     async def _recover(self, reason: str, seq: int):
         """Sai do travamento: mata o daemon e recomeça FRESH (sem re-resume da sessão pesada,
-        que é a causa do trava). Avisa por voz e no painel. Próximo _send sobe limpo."""
+        que é a causa do trava). Se o turno travado era read-only (modo chat), REFAZ sozinho
+        o último pedido — sem fazer o usuário repetir. Em modo code pode ter mutação no meio,
+        então não refaz cego: pede pra repetir."""
         if seq != self._turn_seq:
             return
         logger.warning(f"[brain] watchdog recuperando ({reason}) — respawn FRESH")
+        # read-only e ainda não refez? -> dá pra refazer sozinho com segurança.
+        safe_redo = self._mode == "chat" and bool(self._last_text) and not self._retried
         self._kill()
         self._proc = None
         self._resume = None                    # FRESH: NÃO re-resume a sessão pesada
@@ -434,19 +461,34 @@ class ClaudeBrain(FrameProcessor):
         self._buf = ""
         if self._ui:
             self._ui.set_session(self._session_id)
+        if safe_redo:
+            self._retried = True
+            if self._ui:
+                self._ui.status("refazendo…")
+            await self._say("Perai, deixa eu refazer isso.")
+            await self._send(self._last_text, is_retry=True)
+            return
+        if self._ui:
             self._ui.error("travei e recomecei do zero — pode repetir?")
             self._ui.status("ouvindo")
         await self._say(self._recover_phrase)  # feedback por voz (usuário pode não estar olhando)
 
     def _desired_mode(self, text: str) -> str:
-        """Stickiness: cada troca chat<->code MATA + faz --resume da sessão (caro numa call
-        longa). Pra reduzir esse churn: pedido claro de código -> 'code'. Sem sinal de código,
-        se já está em 'code' e ainda dentro da janela ativa (tarefa em andamento), FICA em
-        'code' — não volta pro chat por causa de fala intermediária ('ok', 'agora testa').
-        Só relaxa pra 'chat' quando a janela expira (conversa esfriou)."""
-        if _CODE_RE.search(text):
+        """Escolhe chat<->code MINIMIZANDO flips: cada troca MATA + faz --resume da sessão
+        (caro numa call longa = causa raiz do 'travei e recomecei'). Regras:
+          1. Mutação explícita ('conserta', 'edita', 'deploy'...) -> 'code'. Único gatilho
+             que paga o respawn pro Opus xHigh.
+          2. 'só analisa / não executa' ou pergunta de investigação ('analisa', 'por que',
+             'o que') -> read-only: FICA no modo atual (sem flip, sem resume pesado). Antes
+             'bug/debug/erro' jogava pra code e travava resumindo sessão pesada.
+          3. Fala neutra ('ok', 'agora testa') -> stickiness: fica no modo atual na janela."""
+        now = time.monotonic()
+        sticky = now < self._active_until
+        if _MUTATE_RE.search(text):
             return "code"
-        if self._mode == "code" and time.monotonic() < self._active_until:
+        if _NO_EXEC_RE.search(text) or _ANALYZE_RE.search(text):
+            return self._mode if sticky else "chat"   # read-only: sem flip
+        if self._mode == "code" and sticky:
             return "code"
         return "chat"
 

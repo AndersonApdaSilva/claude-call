@@ -75,7 +75,7 @@ ACTIVE_WINDOW = float(os.getenv("CALL_ACTIVE_WINDOW", "25"))
 # Watchdog do turno: se o cérebro travar, recomeça sozinho (respawn FRESH) em vez de ficar
 # preso em "pensando". FIRST_RESP = s sem NENHUMA resposta (resume pesado/daemon morto).
 # TURN = s travado depois de já ter respondido (tool/stall longo; acima do timeout do Bash).
-FIRST_RESP_TIMEOUT = float(os.getenv("CALL_FIRST_RESP_TIMEOUT", "45"))
+FIRST_RESP_TIMEOUT = float(os.getenv("CALL_FIRST_RESP_TIMEOUT", "75"))
 TURN_TIMEOUT = float(os.getenv("CALL_TURN_TIMEOUT", "120"))
 
 # Anti-eco
@@ -140,11 +140,14 @@ _VOICE_RULES = {
     ),
     "pt": (
         "Voce ta numa ligacao de voz. Fale brasileiro mesmo: to, ta, ne, ce, pra, pro, numa. "
-        "MAXIMO 1 frase curta por resposta. Sem enrolacao, sem detalhe nao pedido. "
-        "So entrega o resultado. Nao narre o que ta fazendo. "
-        "NUNCA leia codigo, URL, caminho, lista ou numero longo. "
+        "MAXIMO 1-2 frases curtas. So a CONCLUSAO, direto ao ponto: o que era, se resolveu, "
+        "o que voce fez. Ex.: 'resolvido, era o timeout, ja arrumei' / 'nao era bug de "
+        "controle, era cache; ajustei'. "
+        "NUNCA fale nome de arquivo, caminho, codigo, URL, comando, lista nem numero longo. "
+        "Se precisar apontar algo, diz o nome da SESSAO ou da tarefa, nunca o arquivo. "
+        "Nao narre passo a passo o que ta fazendo — so o resultado final. "
         "Se nao sabe ainda, fala 'perai'. Nada de 'claro!', 'certamente!', 'entendido!'. "
-        "REGRA DE OURO: menos e mais. Uma frase. Direto."
+        "REGRA DE OURO: menos e mais. Direto."
     ),
 }
 VOICE_RULES = os.getenv("CALL_SYSTEM") or _VOICE_RULES.get(LANG[:2], _VOICE_RULES["en"])

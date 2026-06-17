@@ -12,6 +12,7 @@ import asyncio
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import traceback
@@ -39,37 +40,47 @@ def _now() -> str:
 
 
 def _mascot(status: str, frame: int, muted: bool) -> list[str]:
-    """Mascote BLOCO (13 wide, 7 rows) — robô chunky, olhos/boca animados em blocos."""
+    """Mascote BLOCO GRANDE (21 wide, 10 rows) — robô chunky, olhos/boca animados.
+    Olhos e boca ocupam 2 linhas (mais alto/visível). Mudo = cara parada de verdade."""
+    W = 19
     f = frame
-    blink = (f % 38) < 2 and status not in ("erro",) and not muted
-    box = lambda s: "█" + s + "█"  # noqa: E731  inner = 11
+    fr = lambda s: "█" + s[:W] + " " * (W - len(s[:W])) + "█"  # noqa: E731  linha com borda
+    blink = (f % 38) < 2 and status != "erro" and not muted
 
-    if muted:
-        eyes, mouth = "  ▬▬   ▬▬  ", "   ▄▄▄▄▄   "
+    # --- olhos (centrados; 'pensando' faz vaguear de leve) ---
+    if muted:                       # mudo: olhos "desligados" (traços), sem animação
+        eye = "    ▬▬▬     ▬▬▬"
     elif status == "erro":
-        eyes, mouth = "  ██   ██  ", "   ▀▀▀▀▀   "
+        eye = "    ███     ███"
     elif blink:
-        eyes, mouth = "  ▀▀   ▀▀  ", "   ▄▄▄▄▄   "
-    elif status == "pensando":   # olhos vagando (pensativo)
-        eyes = ["██     ██  ", "  ██   ██  ", "  ██     ██", "  ██   ██  "][(f // 3) % 4]
-        mouth = "   ▄▄▄▄▄   "
-    elif status == "fazendo":    # boca "mastigando" (trabalhando)
-        eyes = "  ██   ██  "
-        mouth = ["   ▄█▄█▄   ", "   █▄█▄█   ", "   ▄▄█▄▄   "][(f // 2) % 3]
-    elif status == "falando":    # boca abrindo/fechando
-        eyes = "  ██   ██  "
-        mouth = ["   ▄▄▄▄▄   ", "   █████   ", "   ▄███▄   "][(f // 2) % 3]
-    else:                        # ouvindo — carinha de boa
-        eyes, mouth = "  ██   ██  ", "   ▀▄▄▄▀   "
+        eye = "    ▀▀▀     ▀▀▀"
+    elif status == "pensando":
+        gap = [2, 4, 6, 4][(f // 3) % 4]
+        eye = " " * gap + "███     ███"
+    else:
+        eye = "    ███     ███"
 
+    # --- boca (centrada) ---
+    if muted:
+        mouth = "      ▄▄▄▄▄▄▄"
+    elif status == "erro":
+        mouth = "      ▀▀▀▀▀▀▀"
+    elif status == "fazendo":       # mastigando (trabalhando)
+        mouth = ["      ▄█▄█▄█▄", "      █▄█▄█▄█", "      ▄▄█▄█▄▄"][(f // 2) % 3]
+    elif status == "falando":       # abrindo/fechando (falando de verdade)
+        mouth = ["      ▄▄▄▄▄▄▄", "      ███████", "      ▄█████▄"][(f // 2) % 3]
+    else:                           # ouvindo — sorrisinho
+        mouth = "      ▀▄▄▄▄▄▀"
+
+    blank = fr("")
     return [
-        "▟" + "█" * 11 + "▙",
-        box("           "),
-        box(eyes),
-        box("           "),
-        box(mouth),
-        box("           "),
-        "▜" + "█" * 11 + "▛",
+        "▟" + "█" * W + "▙",
+        blank,
+        fr(eye), fr(eye),
+        blank, blank,
+        fr(mouth), fr(mouth),
+        blank,
+        "▜" + "█" * W + "▛",
     ]
 
 
@@ -355,16 +366,32 @@ class CallUI:
         h = getattr(c, "height", 24) or 24
         return w, h
 
-    def _wave(self, n: int, rows: int = 5) -> list[str]:
-        """Wave SINCRONIZADA com o áudio real do mic (VU meter scrollando)."""
+    @staticmethod
+    def _short(text: str, max_chars: int = 160) -> str:
+        """Resume o que foi OUVIDO pra ~2 frases — só referência no painel (texto longo
+        digitado/colado fica gigante). O texto cheio continua indo pro Claude e pro feed."""
+        t = " ".join((text or "").split())
+        if not t:
+            return ""
+        parts = re.split(r"(?<=[.!?…])\s+", t)
+        s = " ".join(parts[:2]).strip()
+        if len(s) > max_chars:
+            s = s[:max_chars - 1].rstrip() + "…"
+        return s
+
+    def _wave(self, n: int, rows: int = 7) -> list[str]:
+        """Wave SINCRONIZADA com o áudio real do mic (VU meter scrollando). Mais alta (7
+        linhas), com ganho e uma textura leve de ruído pra não ficar reta/morta no silêncio."""
         cols = list(self._levels)[-n:]
         if len(cols) < n:
             cols = [0.0] * (n - len(cols)) + cols
         out = []
         for r in range(rows):  # r=0 topo
             line = []
-            for v in cols:
-                level = int(v * rows * 8) - (rows - 1 - r) * 8
+            for i, v in enumerate(cols):
+                shim = 0.05 * (0.5 + 0.5 * math.sin(self._frame * 0.4 + i * 0.6))  # ruído sutil
+                vv = min(1.0, v * 1.35 + shim)
+                level = int(vv * rows * 8) - (rows - 1 - r) * 8
                 line.append(_BARS[max(0, min(8, level))])
             out.append("".join(line))
         return out
@@ -386,6 +413,9 @@ class CallUI:
         else:
             st_label = self._status
             color = _DOT.get(self._status, "white")
+        # mudo = mic fechado, NÃO "sem vida": se está TRABALHANDO (pensando/fazendo/falando)
+        # a mascote anima normal (feedback de que tá rolando algo). Só fica estática/apagada
+        # quando mudo E ociosa (nada acontecendo) — aí sim "cara de mudo".
         mascot_muted = self.muted and not working
         # borda PULSANDO (amarelo escuro<->claro) enquanto pensa/faz — "tá acontecendo algo"
         border = color
@@ -393,8 +423,11 @@ class CallUI:
             b = 0.40 + 0.60 * (0.5 + 0.5 * math.sin(self._frame * 0.30))  # ciclo ~1.5s
             v = max(0, min(255, int(b * 255)))
             border = f"#{v:02x}{v:02x}00"
-        # cor da mascote: pulsa ao pensar/fazer, cicla "humores" quando ociosa, status nos outros
-        if self._status in ("pensando", "fazendo"):
+        # cor da mascote: mudo = apagada (cinza, "desligada"); pulsa ao pensar/fazer;
+        # cicla "humores" quando ociosa; status nos outros
+        if mascot_muted:
+            mascot_color = "grey50"
+        elif self._status in ("pensando", "fazendo"):
             mascot_color = border
         elif self._status == "ouvindo" and not self.muted:
             mascot_color = _MOODS[(self._frame // 45) % len(_MOODS)]
@@ -408,29 +441,30 @@ class CallUI:
             body.append(Align.center(Text(ml, style=f"bold {mascot_color}")))
         body.append(Text(""))
 
-        title = Text.assemble((f"▛▀  {self.name.upper()}  ▀▜", "bold magenta"),
-                              ("   ● ", color), (st_label, f"bold {color}"))
+        # topo: SEM repetir o nome (já está na moldura). Status e mudo um DEBAIXO do outro.
+        body.append(Align.center(Text.assemble(("● ", color), (st_label, f"bold {color}"))))
         if self.muted:
-            title.append("   🔇 MUDO (M/espaço p/ voltar)", style="bold bright_red")
-        body.append(Align.center(title))
+            body.append(Align.center(Text("▸ MUDO   ·   M/espaço p/ voltar",
+                                          style="bold bright_red")))
         body.append(Text(""))
         for wl in self._wave(wave_n):
             body.append(Align.center(Text(wl, style=color)))
         body.append(Text(""))
 
-        info = [Text.assemble(("🎤 ouvido   ", "bold cyan"), (self._heard or "—", "white"))]
+        info = [Text.assemble(("▸ ouvido   ", "bold cyan"),
+                              (self._short(self._heard) or "—", "white"))]
         for a in self._actions:
-            info.append(Text.assemble(("🔧 ", "bold yellow"), (a, "yellow")))
+            info.append(Text.assemble(("▸ ", "bold yellow"), (a, "yellow")))
         reply = self._reply or ("…" if self._status in ("pensando", "fazendo") else "—")
-        info.append(Text.assemble(("💬 resposta ", "bold green"), (reply, "white")))
+        info.append(Text.assemble(("▸ resposta ", "bold green"), (reply, "white")))
         if self._typing:
-            info.append(Text.assemble(("✍ escrevendo ", "bold bright_magenta"),
+            info.append(Text.assemble(("▸ escrevendo ", "bold bright_magenta"),
                                       (self._typing_buf + "▏", "white"),
                                       ("   (Enter envia · Esc cancela · ⌘V cola)", "dim")))
         if self._hint and not self._reply:
-            info.append(Text(f"⏳ {self._hint}", style="dim yellow"))
+            info.append(Text(f"▸ {self._hint}", style="dim yellow"))
         if self._error:
-            info.append(Text.assemble(("❌ erro     ", "bold bright_red"),
+            info.append(Text.assemble(("▸ erro     ", "bold bright_red"),
                                       (self._error, "bright_red")))
         body.extend(info)
 
@@ -451,28 +485,28 @@ class CallUI:
         mx = int(s.get("sens_max", 4))
         bar = "▓" * (lvl + 1) + "░" * (mx - lvl)
         rows = [
-            Text("⚙  CONFIG  (C fecha)", style="bold magenta"),
-            Text.assemble(("  🎚 sensibilidade mic  ", "bold"),
+            Text("▸ CONFIG  (C fecha)", style="bold magenta"),
+            Text.assemble(("  ▸ sensibilidade mic  ", "bold"),
                           (f"[{bar}] {lvl}/{mx}", "bright_magenta"),
                           ("   + / −   (não ouve? aperta +)", "dim")),
-            Text.assemble(("  ⏱ espera p/ responder ", "bold"),
+            Text.assemble(("  ▸ espera p/ responder ", "bold"),
                           (f"{s.get('stop_secs', 1.0):.1f}s", "white"),
                           ("   , / .   (maior = não te atropela)", "dim")),
-            Text.assemble(("  🔉 filtro de ruído    ", "bold"),
+            Text.assemble(("  ▸ filtro de ruído    ", "bold"),
                           (["off", "médio", "alto"][int(s.get("noise", 1))], "white"),
                           ("   N   (ignora ruído curto)", "dim")),
-            Text.assemble(("  🧠 effort programar   ", "bold"),
+            Text.assemble(("  ▸ effort programar   ", "bold"),
                           ("ultracode (max)" if s.get("code_effort") == "max" else "xhigh", "white"),
                           ("   E   (voz fica Sonnet/medium)", "dim")),
-            Text.assemble(("  🎤 entrada (mic)      ", "bold"),
+            Text.assemble(("  ▸ entrada (mic)      ", "bold"),
                           (str(s.get("device", "default")), "white"),
                           ("   (fixo: mic do Mac)", "dim")),
-            Text.assemble(("  ✋ interromper fala   ", "bold"), ("tecla I (agora)", "white")),
-            Text.assemble(("  🔀 barge-in por voz   ", "bold"),
+            Text.assemble(("  ▸ interromper fala   ", "bold"), ("tecla I (agora)", "white")),
+            Text.assemble(("  ▸ barge-in por voz   ", "bold"),
                           ("ON" if s.get("barge_in") else "OFF",
                            "bright_green" if s.get("barge_in") else "dim"),
                           ("   default OFF · só com fone (CALL_ECHO_GATE=0 no .env)", "dim")),
-            Text.assemble(("  ♻ reset padrão       ", "bold"),
+            Text.assemble(("  ▸ reset padrão       ", "bold"),
                           ("tecla R", "white"),
                           ("   (VAD 2/4 · mic do computador · barge-in OFF)", "dim")),
         ]
