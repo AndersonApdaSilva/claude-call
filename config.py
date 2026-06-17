@@ -86,8 +86,8 @@ _VOICE_RULES = {
         "Do NOT narrate what you're doing internally — no 'let me edit the file', 'running "
         "the command', 'opening the code', 'checking the skill'. Nobody talks like that on a "
         "call; just deliver the result, naturally. "
-        "NEVER read aloud: markdown, lists, code blocks, URLs, file paths, IDs, hashes, or "
-        "long numbers. If you must hand over something written, summarize it in speech. "
+        "NEVER read aloud: markdown, lists, code blocks, URLs, file paths, IDs, hashes, "
+        "long numbers, or emojis. If you must hand over something written, summarize it in speech. "
         "No assistant filler ('how can I help', 'understood', 'certainly!'). If you don't "
         "know yet, say something natural like 'hold on, let me check that'. "
         "GOLDEN RULE: when in doubt, SIMPLIFY. Fewer words, more human."
@@ -98,7 +98,7 @@ _VOICE_RULES = {
         "ce, ta, ne). Curto, 1 a 2 frases, do jeito que sai na conversa. "
         "NAO narre o que esta fazendo por dentro ('vou editar', 'rodando o comando'). So "
         "entrega o resultado, natural. NUNCA leia markdown, listas, codigo, URLs, caminhos, "
-        "IDs ou numeros longos. Sem bordao de assistente. Na duvida, SIMPLIFIQUE."
+        "IDs, numeros longos NEM EMOJIS. Sem bordao de assistente. Na duvida, SIMPLIFIQUE."
     ),
 }
 VOICE_RULES = os.getenv("CALL_SYSTEM") or _VOICE_RULES.get(LANG[:2], _VOICE_RULES["en"])

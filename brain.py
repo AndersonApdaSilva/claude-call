@@ -27,14 +27,30 @@ from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 
 _SENT_BOUNDARY = re.compile(r"[.!?…](?=\s)|\n")
 
+# Emojis e simbolos pictograficos — TTS nunca deve ler isso (😀 ✅ 🎉 → ⚠).
+_EMOJI = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"   # emoticons, pictographs, transport, symbols ext
+    "\U00002600-\U000027BF"   # misc symbols + dingbats (✅ ⚠ ✨ ✓ ...)
+    "\U0001F1E6-\U0001F1FF"   # bandeiras
+    "\U00002190-\U000021FF"   # setas
+    "\U00002300-\U000023FF"   # misc tecnico (⏰ ⌨ ...)
+    "\U00002B00-\U00002BFF"   # setas/simbolos diversos (⭐ ...)
+    "\U0000FE00-\U0000FE0F"   # variation selectors
+    "\U0000200D"              # zero-width joiner
+    "]+",
+    flags=re.UNICODE,
+)
+
 
 def _clean_for_speech(s: str) -> str:
-    """Tira markdown antes de falar — TTS nao deve ler *, #, `, bullets, links."""
+    """Tira markdown E emojis antes de falar — TTS nao deve ler *, #, `, links, 😀, ✅."""
     s = s.replace("```", " ")
     s = re.sub(r"`([^`]*)`", r"\1", s)
     s = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", s)
     s = re.sub(r"[*_~#>|]+", "", s)
     s = re.sub(r"^\s*[-•·]\s*", "", s)
+    s = _EMOJI.sub("", s)
     return re.sub(r"\s+", " ", s).strip()
 
 
