@@ -19,6 +19,7 @@ import re
 import signal
 import time
 import uuid
+from collections import deque
 
 from loguru import logger
 
@@ -26,6 +27,45 @@ from pipecat.frames.frames import Frame, TranscriptionFrame, TTSSpeakFrame, User
 from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 
 _SENT_BOUNDARY = re.compile(r"[.!?…](?=\s)|\n")
+
+
+def _norm_words(s: str) -> list[str]:
+    return [w for w in re.split(r"\W+", (s or "").lower()) if w]
+
+# Palavra curta = só INTERROMPE a fala (nao vira prompt). Depois você continua falando.
+_INTERRUPT_RE = re.compile(
+    r"^\s*(ei+|ai+|opa|para|pára|parou|pera+|peraí|espera|calma|chega|stop|wait|hey)[\s!.,…]*$",
+    re.IGNORECASE,
+)
+
+# Intenção de PROGRAMAR -> troca pro modelo/effort forte (Opus xHigh).
+_CODE_RE = re.compile(
+    r"\b(program|c[óo]dig|implementa|refator|conserta|corrig|edita|alter|cria(r)?\s+"
+    r"(o\s+|um\s+|uma\s+)?(arquivo|fun[çc]|componente|script|classe|m[ée]todo|teste)|"
+    r"deploy|comita|commit|builda|instala|roda\s+o|executa\s+o|debug|bug\b|fix\b)",
+    re.IGNORECASE,
+)
+
+# Comando de voz pra abrir a janela "Claude Code ao vivo".
+_SHOW_RE = re.compile(
+    r"\b(mostra(r)?|abre|abrir|abra)\b.*\b(tela|terminal|janela|claude|fazendo|acontec|trabalh)",
+    re.IGNORECASE,
+)
+
+# Campos de input de tool que viram "alvo" legivel no painel.
+_TOOL_TARGET_FIELDS = ("file_path", "path", "notebook_path", "command",
+                       "pattern", "query", "url", "prompt")
+
+
+def _tool_target(inp: dict) -> str | None:
+    if not isinstance(inp, dict):
+        return None
+    for k in _TOOL_TARGET_FIELDS:
+        v = inp.get(k)
+        if isinstance(v, str) and v.strip():
+            v = v.strip().replace("\n", " ")
+            return v if len(v) <= 48 else v[:45] + "…"
+    return None
 
 
 def _clean_for_speech(s: str) -> str:
@@ -44,17 +84,26 @@ class ClaudeBrain(FrameProcessor):
         *,
         voice_rules: str,
         model: str | None = None,
+        effort: str | None = None,
+        code_model: str | None = None,
+        code_effort: str | None = None,
         permission_flag: str = "--dangerously-skip-permissions",
         wake_words: list[str] | None = None,
         active_window_secs: float = 25.0,
         fillers: list[str] | None = None,
         session_id: str | None = None,
         cwd: str | None = None,
+        ui=None,
     ):
         super().__init__()
+        self._ui = ui
         self._voice_rules = voice_rules
         self._cwd = cwd or os.getcwd()
-        self._model = model
+        # Dois modos: chat (voz, rapido) e code (programar, forte). Troca on-the-fly.
+        self._chat_model, self._chat_effort = model, effort
+        self._code_model, self._code_effort = code_model, code_effort
+        self._model, self._effort = model, effort
+        self._mode = "chat"
         self._permission_flag = permission_flag
         self._wake = [w.lower() for w in (wake_words or []) if w.strip()]
         self._active_window = active_window_secs
@@ -71,12 +120,34 @@ class ClaudeBrain(FrameProcessor):
         self._narrated_tool = False
         self._spoke = False
         self._active_until = 0.0
+        self._awaiting = False   # esperando 1a resposta do turno (pro watchdog)
+        self._ignore_utterance = False   # mute decidido no INÍCIO da fala (deixa a atual terminar)
+        self._recent_speech: deque = deque(maxlen=30)  # (t, set(palavras)) — anti-eco
 
     def _should_answer(self, text: str) -> bool:
         if not self._wake:
             return True
         low = text.lower()
         return any(w in low for w in self._wake) or time.monotonic() < self._active_until
+
+    def _has_wake(self, text: str) -> bool:
+        low = text.lower()
+        return any(w in low for w in self._wake)
+
+    def _strip_wake(self, text: str) -> str:
+        """Tira a wake word ('claudinha') do texto antes de mandar pro Claude — ela é só
+        gatilho, não faz parte do pedido. Remove todas as ocorrências e limpa pontuação."""
+        if not self._wake:
+            return text
+        out = text
+        for w in self._wake:
+            low = out.lower()
+            idx = low.find(w)
+            while idx != -1:
+                out = out[:idx] + " " + out[idx + len(w):]
+                low = out.lower()
+                idx = low.find(w)
+        return re.sub(r"\s+", " ", out).strip(" ,.!?:;-—").strip()
 
     def _build_cmd(self) -> list[str]:
         cmd = [
@@ -90,6 +161,8 @@ class ClaudeBrain(FrameProcessor):
             cmd += [self._permission_flag]
         if self._model:
             cmd += ["--model", self._model]
+        if self._effort:
+            cmd += ["--effort", self._effort]
         cmd += ["--append-system-prompt", self._voice_rules]
         return cmd
 
@@ -119,10 +192,16 @@ class ClaudeBrain(FrameProcessor):
 
     async def _send(self, text: str):
         await self._ensure_proc()
+        from sounds import play
+        play("heard")           # bip: captei sua fala, vou executar
+        if self._ui:
+            self._ui.heard(text)
         self._buf = ""
         self._discard = False
         self._narrated_tool = False
         self._spoke = False
+        self._awaiting = True
+        self.create_task(self._slow_watch())
         msg = {"type": "user", "message": {"role": "user", "content": text}}
         payload = (json.dumps(msg) + "\n").encode()
         try:
@@ -135,12 +214,30 @@ class ClaudeBrain(FrameProcessor):
             self._proc.stdin.write(payload)
             await self._proc.stdin.drain()
 
+    async def _iter_lines(self):
+        """Le o stdout em chunks e quebra por '\\n' na mao. O `async for ... in stdout`
+        usa readline (limite de 1MB/linha) e estoura LimitOverrunError quando o claude
+        emite uma linha JSON gigante (tool/conteudo grande). read() nao tem esse limite."""
+        buf = b""
+        while True:
+            chunk = await self._proc.stdout.read(65536)
+            if not chunk:
+                if buf.strip():
+                    yield buf.decode(errors="ignore").strip()
+                break
+            buf += chunk
+            while True:
+                nl = buf.find(b"\n")
+                if nl < 0:
+                    break
+                raw, buf = buf[:nl], buf[nl + 1:]
+                line = raw.decode(errors="ignore").strip()
+                if line:
+                    yield line
+
     async def _read_loop(self):
         try:
-            async for raw in self._proc.stdout:
-                line = raw.decode(errors="ignore").strip()
-                if not line:
-                    continue
+            async for line in self._iter_lines():
                 try:
                     ev = json.loads(line)
                 except json.JSONDecodeError:
@@ -152,9 +249,13 @@ class ClaudeBrain(FrameProcessor):
                     if sid:
                         self._session_id = sid
                         self._resume = sid
+                        if self._ui:
+                            self._ui.set_session(sid)
                     continue
 
+                # deltas: latencia baixa pra VOZ (fala frase a frase) + filler ao usar tool
                 if etype == "stream_event":
+                    self._awaiting = False   # chegou resposta: cancela o watchdog
                     inner = ev.get("event", {})
                     itype = inner.get("type")
                     if itype == "content_block_start":
@@ -170,26 +271,79 @@ class ClaudeBrain(FrameProcessor):
                             for s in sents:
                                 if await self._say(s):
                                     self._spoke = True
+                                    if self._ui:
+                                        self._ui.reply_append(s)
+
+                # mensagem COMPLETA do assistente: tool_use (input cheio) + thinking + texto
+                # -> alimenta o painel (compacto) e o work.feed (Claude Code programando)
+                elif etype == "assistant":
+                    for b in (ev.get("message", {}).get("content") or []):
+                        bt = b.get("type")
+                        if bt == "tool_use":
+                            name, inp = b.get("name") or "tool", b.get("input") or {}
+                            if self._ui:
+                                self._ui.tool(name, _tool_target(inp))
+                                self._ui.work_tool(name, inp)
+                        elif bt == "thinking" and self._ui:
+                            self._ui.work_think(b.get("thinking", ""))
+                        elif bt == "text" and self._ui:
+                            self._ui.work_text(b.get("text", ""))
+
+                # resultado de tool (stdout/erro) -> work.feed
+                elif etype == "user":
+                    for b in (ev.get("message", {}).get("content") or []):
+                        if b.get("type") == "tool_result" and self._ui:
+                            self._ui.work_result(b.get("content"), b.get("is_error"))
 
                 elif etype == "result":
+                    tail = self._buf.strip()
                     if not self._discard and await self._say(self._buf):
                         self._spoke = True
+                        if self._ui and tail:
+                            self._ui.reply_append(tail)
                     self._buf = ""
                     self._active_until = time.monotonic() + self._active_window
+                    if self._ui:
+                        self._ui.done()
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
             logger.exception("[brain] read loop died")
+            if self._ui:
+                self._ui.error(f"cérebro caiu: {e}", e)
 
     def _next_filler(self) -> str:
         f = self._fillers[self._filler_i % len(self._fillers)]
         self._filler_i += 1
         return f
 
+    def _remember_speech(self, text: str):
+        """Guarda o que a assistente FALOU (pro filtro anti-eco)."""
+        words = set(_norm_words(text))
+        if words:
+            self._recent_speech.append((time.monotonic(), words))
+
+    def _is_echo(self, text: str) -> bool:
+        """True se o 'ouvido' é a propria voz dela voltando pelo alto-falante.
+        Compara com o que ela falou nos ultimos ~8s (sobreposicao de palavras)."""
+        words = _norm_words(text)
+        if len(words) < 2:
+            return False
+        now = time.monotonic()
+        spoken = set()
+        for t, ws in self._recent_speech:
+            if now - t <= 8.0:
+                spoken |= ws
+        if not spoken:
+            return False
+        hit = sum(1 for w in set(words) if w in spoken)
+        return hit / len(set(words)) >= 0.7
+
     async def _say(self, text: str) -> bool:
         clean = _clean_for_speech(text)
         if not clean:
             return False
+        self._remember_speech(clean)
         await self.push_frame(TTSSpeakFrame(clean), FrameDirection.DOWNSTREAM)
         return True
 
@@ -206,6 +360,50 @@ class ClaudeBrain(FrameProcessor):
                 sents.append(s)
         return buf, sents
 
+    async def _slow_watch(self):
+        """Se a 1a resposta demorar, avisa no painel (em vez de 'pensando' mudo)."""
+        try:
+            await asyncio.sleep(12)
+            if self._awaiting and self._ui:
+                self._ui.hint("demorando… (sessão grande ou modelo lento — CALL_CONTINUE=0 acelera)")
+        except asyncio.CancelledError:
+            pass
+
+    async def _switch_mode(self, mode: str):
+        """Troca chat<->code (modelo/effort). Se ja tem daemon, respawna resumindo a conversa."""
+        if mode == self._mode:
+            return
+        self._mode = mode
+        if mode == "code":
+            self._model, self._effort = self._code_model, self._code_effort
+        else:
+            self._model, self._effort = self._chat_model, self._chat_effort
+        if self._ui:
+            self._ui.hint("modo código (Opus xHigh)…" if mode == "code" else "modo voz (Sonnet)")
+        logger.info(f"[brain] modo={mode} model={self._model} effort={self._effort}")
+        if self._proc is not None and self._proc.returncode is None:
+            self._resume = self._session_id     # mantem a conversa no novo modelo
+            self._kill()
+            self._proc = None
+            await self._ensure_proc()
+
+    async def inject_text(self, text: str):
+        """Injeta um turno de TEXTO (colado/digitado) como se você tivesse falado."""
+        text = (text or "").strip()
+        if not text:
+            return
+        await self._switch_mode("code" if _CODE_RE.search(text) else "chat")
+        await self._send(text)
+
+    async def _open_tab_bg(self):
+        """Abre a aba do lado fora do event loop (osascript bloqueia ~ segundos)."""
+        try:
+            await asyncio.to_thread(self._ui.open_window)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"[brain] open tab: {e}")
+            if self._ui:
+                self._ui.error(f"abrir aba: {e}", e)
+
     def _kill(self):
         if self._proc and self._proc.returncode is None:
             try:
@@ -216,17 +414,58 @@ class ClaudeBrain(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
+        # grava a fala que passa pelo pipeline (ex.: greeting), pro filtro anti-eco
+        if isinstance(frame, TTSSpeakFrame) and (frame.text or "").strip():
+            self._remember_speech(frame.text)
+
         if isinstance(frame, UserStartedSpeakingFrame):
-            self._discard = True
-            self._buf = ""
+            # decide AQUI (no início da fala) se ela vale. Mutar DEPOIS não descarta a fala
+            # que já começou — ela termina de transcrever e executar.
+            self._ignore_utterance = bool(self._ui and self._ui.muted)
+            if not self._ignore_utterance:  # barge-in só quando não está mutado
+                self._discard = True
+                self._buf = ""
             await self.push_frame(frame, direction)
             return
 
         if isinstance(frame, TranscriptionFrame) and (frame.text or "").strip():
             text = frame.text.strip()
-            if not self._should_answer(text):
-                logger.debug(f"[brain] gated: {text!r}")
+            if self._ignore_utterance or (self._ui and self._ui.muted):
+                # fala que COMEÇOU mutada, ou mute apertado no meio da fala -> ignora
+                # (o EchoGate já fecha o mic; isto pega o parcial que já estava no buffer).
+                logger.debug(f"[brain] mutado, ignorando: {text!r}")
                 return
+            if _INTERRUPT_RE.match(text):  # "ei"/"para" = só interrompe a fala
+                self._discard = True
+                self._buf = ""
+                if self._ui:
+                    self._ui.status("ouvindo")
+                logger.debug(f"[brain] interrompido por: {text!r}")
+                return
+            if self._is_echo(text):       # a propria voz dela voltando pelo alto-falante
+                logger.debug(f"[brain] eco ignorado: {text!r}")
+                return
+            if not self._should_answer(text):
+                logger.debug(f"[brain] gated (sem '{'/'.join(self._wake)}'): {text!r}")
+                return
+            # disse a wake word -> tira ela do pedido (é só gatilho). Se só disse "claudinha"
+            # (sem comando), abre a janela ativa pro próximo turno não precisar repetir.
+            if self._wake and self._has_wake(text):
+                text = self._strip_wake(text)
+                if not text:
+                    self._active_until = time.monotonic() + self._active_window
+                    if self._ui:
+                        self._ui.status("ouvindo")
+                    logger.debug("[brain] wake word só, abrindo janela ativa")
+                    return
+            # comando de voz: abrir a aba "Claude Code ao vivo" (sem travar a call)
+            if self._ui and _SHOW_RE.search(text):
+                self._ui.status("abrindo a aba…")
+                self.create_task(self._open_tab_bg())
+                await self._say("Abrindo a aba aqui do lado.")
+                return
+            # programar? troca pro modelo forte (Opus xHigh); senão fica no chat (Sonnet)
+            await self._switch_mode("code" if _CODE_RE.search(text) else "chat")
             await self._send(text)
             return
 
