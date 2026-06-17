@@ -47,6 +47,13 @@ _FILLERS = {
     "es": ["Un momento.", "Déjame ver.", "Espera.", "Ya te digo."],
 }
 
+# Frase falada quando o watchdog recupera de um travamento (recomeço fresh).
+_RECOVER = {
+    "en": "I got stuck and restarted — could you say that again?",
+    "pt": "Travei e recomecei do zero. Pode repetir?",
+    "es": "Me trabé y reinicié. ¿Puedes repetir?",
+}
+
 
 def _setup_keys(handler, loop):
     """Lê teclas (cbreak + add_reader) e manda pro handler. Mantém ISIG (Ctrl+C ok)."""
@@ -144,7 +151,10 @@ async def main():
         code_model=C.CODE_MODEL, code_effort=C.CODE_EFFORT, permission_flag=C.PERMISSION,
         wake_words=C.WAKE, active_window_secs=C.ACTIVE_WINDOW,
         fillers=_FILLERS.get(C.LANG[:2], _FILLERS["en"]),
-        session_id=session_id, cwd=C.CWD, ui=ui,
+        session_id=session_id, cwd=C.CWD,
+        first_resp_timeout=C.FIRST_RESP_TIMEOUT, stall_timeout=C.TURN_TIMEOUT,
+        recover_phrase=_RECOVER.get(C.LANG[:2], _RECOVER["en"]),
+        ui=ui,
     )
 
     try:

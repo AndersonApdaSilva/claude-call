@@ -72,6 +72,12 @@ WAKE = ([] if _WAKE_RAW.strip().lower() in ("", "off", "none", "0", "false", "no
         else [w.strip().lower() for w in _WAKE_RAW.split(",") if w.strip()])
 ACTIVE_WINDOW = float(os.getenv("CALL_ACTIVE_WINDOW", "25"))
 
+# Watchdog do turno: se o cérebro travar, recomeça sozinho (respawn FRESH) em vez de ficar
+# preso em "pensando". FIRST_RESP = s sem NENHUMA resposta (resume pesado/daemon morto).
+# TURN = s travado depois de já ter respondido (tool/stall longo; acima do timeout do Bash).
+FIRST_RESP_TIMEOUT = float(os.getenv("CALL_FIRST_RESP_TIMEOUT", "45"))
+TURN_TIMEOUT = float(os.getenv("CALL_TURN_TIMEOUT", "120"))
+
 # Anti-eco
 ECHO_GATE = os.getenv("CALL_ECHO_GATE", "1") not in ("0", "false", "no")
 ECHO_TAIL = float(os.getenv("CALL_ECHO_TAIL", "0.8"))  # segs que o mic fica mudo APOS ela falar

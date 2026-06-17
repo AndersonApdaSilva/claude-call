@@ -93,6 +93,9 @@ class ClaudeBrain(FrameProcessor):
         fillers: list[str] | None = None,
         session_id: str | None = None,
         cwd: str | None = None,
+        first_resp_timeout: float = 45.0,
+        stall_timeout: float = 120.0,
+        recover_phrase: str = "Sorry, I got stuck — please say that again.",
         ui=None,
     ):
         super().__init__()
@@ -121,6 +124,14 @@ class ClaudeBrain(FrameProcessor):
         self._spoke = False
         self._active_until = 0.0
         self._awaiting = False   # esperando 1a resposta do turno (pro watchdog)
+        # Watchdog do turno: recupera sozinho se o cérebro travar (ex.: --resume de sessão
+        # pesada = prefill gigante que nunca volta). Mata + respawna FRESH + avisa.
+        self._first_resp_timeout = first_resp_timeout  # s sem NENHUMA resposta -> recomeça
+        self._stall_timeout = stall_timeout            # s travado no meio (já respondeu) -> recomeça
+        self._recover_phrase = recover_phrase
+        self._turn_seq = 0           # id do turno atual (invalida watchdog de turno antigo)
+        self._turn_active = False    # há turno em andamento (entre _send e o 'result')
+        self._last_activity = 0.0    # monotonic do último evento vindo do claude
         self._ignore_utterance = False   # mute decidido no INÍCIO da fala (deixa a atual terminar)
         self._recent_speech: deque = deque(maxlen=30)  # (t, set(palavras)) — anti-eco
 
@@ -201,7 +212,10 @@ class ClaudeBrain(FrameProcessor):
         self._narrated_tool = False
         self._spoke = False
         self._awaiting = True
-        self.create_task(self._slow_watch())
+        self._turn_active = True
+        self._turn_seq += 1
+        self._last_activity = time.monotonic()
+        self.create_task(self._slow_watch(self._turn_seq))
         msg = {"type": "user", "message": {"role": "user", "content": text}}
         payload = (json.dumps(msg) + "\n").encode()
         try:
@@ -238,6 +252,7 @@ class ClaudeBrain(FrameProcessor):
     async def _read_loop(self):
         try:
             async for line in self._iter_lines():
+                self._last_activity = time.monotonic()   # sinal de vida p/ o watchdog
                 try:
                     ev = json.loads(line)
                 except json.JSONDecodeError:
@@ -296,6 +311,8 @@ class ClaudeBrain(FrameProcessor):
                             self._ui.work_result(b.get("content"), b.get("is_error"))
 
                 elif etype == "result":
+                    self._turn_active = False     # turno fechou: desarma o watchdog
+                    self._awaiting = False
                     tail = self._buf.strip()
                     if not self._discard and await self._say(self._buf):
                         self._spoke = True
@@ -305,10 +322,16 @@ class ClaudeBrain(FrameProcessor):
                     self._active_until = time.monotonic() + self._active_window
                     if self._ui:
                         self._ui.done()
+            # stdout fechou: daemon saiu. Se foi NO MEIO de um turno, não deixa travado —
+            # zera o relógio do watchdog pra ele recuperar (respawn fresh) já no próximo tick.
+            if self._turn_active:
+                logger.warning("[brain] daemon saiu sem 'result' no meio do turno")
+                self._last_activity = 0.0
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001
             logger.exception("[brain] read loop died")
+            self._last_activity = 0.0    # deixa o watchdog recuperar
             if self._ui:
                 self._ui.error(f"cérebro caiu: {e}", e)
 
@@ -360,14 +383,60 @@ class ClaudeBrain(FrameProcessor):
                 sents.append(s)
         return buf, sents
 
-    async def _slow_watch(self):
-        """Se a 1a resposta demorar, avisa no painel (em vez de 'pensando' mudo)."""
+    def _watch_decision(self, awaiting: bool, idle: float):
+        """Puro/testável: dado (esperando 1a resposta?, segundos ocioso) decide o que o
+        watchdog faz -> ('none'|'hint'|'recover', mensagem)."""
+        if awaiting:                                   # nenhuma resposta ainda neste turno
+            if idle >= self._first_resp_timeout:       # resume pesado / daemon morto -> recupera
+                return ("recover", "sem resposta (resume pesado ou daemon morto)")
+            if idle >= 12:
+                return ("hint", "demorando… (recomeço sozinho se travar)")
+            return ("none", "")
+        # já respondeu: pode estar num tool longo. Só recupera em stall LONGO (acima do
+        # timeout do próprio Bash do claude), pra não matar ferramenta legítima.
+        if idle >= self._stall_timeout:
+            return ("recover", "travou no meio do turno")
+        return ("none", "")
+
+    async def _slow_watch(self, seq: int):
+        """Watchdog do turno: avisa se demora e RECUPERA (mata + respawn FRESH) se travar,
+        pra nunca ficar preso em 'pensando' pra sempre."""
+        hinted = False
         try:
-            await asyncio.sleep(12)
-            if self._awaiting and self._ui:
-                self._ui.hint("demorando… (sessão grande ou modelo lento — CALL_CONTINUE=0 acelera)")
+            while True:
+                await asyncio.sleep(3)
+                if seq != self._turn_seq or not self._turn_active:
+                    return                              # turno acabou ou foi substituído
+                idle = time.monotonic() - self._last_activity
+                action, msg = self._watch_decision(self._awaiting, idle)
+                if action == "hint" and not hinted and self._ui:
+                    self._ui.hint(msg)
+                    hinted = True
+                elif action == "recover":
+                    await self._recover(msg, seq)
+                    return
         except asyncio.CancelledError:
             pass
+
+    async def _recover(self, reason: str, seq: int):
+        """Sai do travamento: mata o daemon e recomeça FRESH (sem re-resume da sessão pesada,
+        que é a causa do trava). Avisa por voz e no painel. Próximo _send sobe limpo."""
+        if seq != self._turn_seq:
+            return
+        logger.warning(f"[brain] watchdog recuperando ({reason}) — respawn FRESH")
+        self._kill()
+        self._proc = None
+        self._resume = None                    # FRESH: NÃO re-resume a sessão pesada
+        self._session_id = str(uuid.uuid4())
+        self._turn_active = False
+        self._awaiting = False
+        self._discard = True                   # descarta qualquer cauda do turno morto
+        self._buf = ""
+        if self._ui:
+            self._ui.set_session(self._session_id)
+            self._ui.error("travei e recomecei do zero — pode repetir?")
+            self._ui.status("ouvindo")
+        await self._say(self._recover_phrase)  # feedback por voz (usuário pode não estar olhando)
 
     async def _switch_mode(self, mode: str):
         """Troca chat<->code (modelo/effort). Se ja tem daemon, respawna resumindo a conversa."""
