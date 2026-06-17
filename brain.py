@@ -438,6 +438,18 @@ class ClaudeBrain(FrameProcessor):
             self._ui.status("ouvindo")
         await self._say(self._recover_phrase)  # feedback por voz (usuário pode não estar olhando)
 
+    def _desired_mode(self, text: str) -> str:
+        """Stickiness: cada troca chat<->code MATA + faz --resume da sessão (caro numa call
+        longa). Pra reduzir esse churn: pedido claro de código -> 'code'. Sem sinal de código,
+        se já está em 'code' e ainda dentro da janela ativa (tarefa em andamento), FICA em
+        'code' — não volta pro chat por causa de fala intermediária ('ok', 'agora testa').
+        Só relaxa pra 'chat' quando a janela expira (conversa esfriou)."""
+        if _CODE_RE.search(text):
+            return "code"
+        if self._mode == "code" and time.monotonic() < self._active_until:
+            return "code"
+        return "chat"
+
     async def _switch_mode(self, mode: str):
         """Troca chat<->code (modelo/effort). Se ja tem daemon, respawna resumindo a conversa."""
         if mode == self._mode:
@@ -461,7 +473,7 @@ class ClaudeBrain(FrameProcessor):
         text = (text or "").strip()
         if not text:
             return
-        await self._switch_mode("code" if _CODE_RE.search(text) else "chat")
+        await self._switch_mode(self._desired_mode(text))
         await self._send(text)
 
     async def _open_tab_bg(self):
@@ -534,7 +546,7 @@ class ClaudeBrain(FrameProcessor):
                 await self._say("Abrindo a aba aqui do lado.")
                 return
             # programar? troca pro modelo forte (Opus xHigh); senão fica no chat (Sonnet)
-            await self._switch_mode("code" if _CODE_RE.search(text) else "chat")
+            await self._switch_mode(self._desired_mode(text))
             await self._send(text)
             return
 
