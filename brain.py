@@ -14,6 +14,7 @@ nao e uma consciencia continua. Mas e um processo unico que o mic alimenta.
 """
 import asyncio
 import json
+import math
 import os
 import re
 import signal
@@ -73,6 +74,23 @@ _SHOW_RE = re.compile(
 # Campos de input de tool que viram "alvo" legivel no painel.
 _TOOL_TARGET_FIELDS = ("file_path", "path", "notebook_path", "command",
                        "pattern", "query", "url", "prompt")
+
+
+def _fuzzy_wake(word: str, wake: str) -> bool:
+    """True se 'word' é provável mishear da wake word (sem deps externas).
+
+    Cobre:
+      - substring direto:  "audinha"  ⊆ "claudinha"  ✓
+      - sufixo fonético:   "odinha"   → ends with "dinha" = wake[-5:]  ✓
+    Rejeita palavras comuns: "galinha", "vizinha", "rainha" → False
+    """
+    w = word.strip(",.!?:;-—").lower()
+    if not w or len(w) < 4:
+        return False
+    if w in wake and len(w) >= len(wake) * 0.60:
+        return True
+    min_suf = max(4, math.ceil(len(w) * 0.75))
+    return len(wake) >= min_suf and w.endswith(wake[-min_suf:])
 
 
 def _tool_target(inp: dict) -> str | None:
@@ -158,26 +176,42 @@ class ClaudeBrain(FrameProcessor):
     def _should_answer(self, text: str) -> bool:
         if not self._wake:
             return True
+        if time.monotonic() < self._active_until:
+            return True
         low = text.lower()
-        return any(w in low for w in self._wake) or time.monotonic() < self._active_until
+        words = re.split(r"\W+", low)
+        return any(
+            (w in low) or any(_fuzzy_wake(word, w) for word in words)
+            for w in self._wake
+        )
 
     def _has_wake(self, text: str) -> bool:
         low = text.lower()
-        return any(w in low for w in self._wake)
+        words = re.split(r"\W+", low)
+        return any(
+            (w in low) or any(_fuzzy_wake(word, w) for word in words)
+            for w in self._wake
+        )
 
     def _strip_wake(self, text: str) -> str:
-        """Tira a wake word ('claudinha') do texto antes de mandar pro Claude — ela é só
-        gatilho, não faz parte do pedido. Remove todas as ocorrências e limpa pontuação."""
+        """Tira wake word e misheards ('audinha', 'odinha'…) do texto — são só gatilho."""
         if not self._wake:
             return text
         out = text
-        for w in self._wake:
+        for wake in self._wake:
+            # exact substring removal
             low = out.lower()
-            idx = low.find(w)
+            idx = low.find(wake)
             while idx != -1:
-                out = out[:idx] + " " + out[idx + len(w):]
+                out = out[:idx] + " " + out[idx + len(wake):]
                 low = out.lower()
-                idx = low.find(w)
+                idx = low.find(wake)
+            # fuzzy word removal (misheards)
+            parts = re.split(r"(\W+)", out)
+            out = "".join(
+                " " if (i % 2 == 0 and _fuzzy_wake(parts[i], wake)) else parts[i]
+                for i, _ in enumerate(parts)
+            )
         return re.sub(r"\s+", " ", out).strip(" ,.!?:;-—").strip()
 
     def _build_cmd(self) -> list[str]:
@@ -575,11 +609,18 @@ class ClaudeBrain(FrameProcessor):
             # (sem comando), abre a janela ativa pro próximo turno não precisar repetir.
             if self._wake and self._has_wake(text):
                 text = self._strip_wake(text)
+                if self._ui:
+                    self._ui.status("captei")   # feedback imediato: "ouvi você"
+                from sounds import play as _play; _play("wake")
                 if not text:
                     self._active_until = time.monotonic() + self._active_window
-                    if self._ui:
-                        self._ui.status("ouvindo")
                     logger.debug("[brain] wake word só, abrindo janela ativa")
+                    # volta pra "ouvindo" após 1.5s (só confirmou que ouviu)
+                    async def _reset_captei():
+                        await asyncio.sleep(1.5)
+                        if self._ui and self._ui._status == "captei":
+                            self._ui.status("ouvindo")
+                    self.create_task(_reset_captei())
                     return
             # comando de voz: abrir a aba "Claude Code ao vivo" (sem travar a call)
             if self._ui and _SHOW_RE.search(text):

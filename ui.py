@@ -28,8 +28,8 @@ WORK_FILE = LOG_DIR / "work.feed"     # detalhado: Claude Code PROGRAMANDO (aba 
 ERROR_LOG = LOG_DIR / "errors.log"
 
 _BARS = " ▁▂▃▄▅▆▇█"
-_DOT = {"ouvindo": "bright_green", "pensando": "yellow", "fazendo": "yellow",
-        "falando": "bright_cyan", "erro": "bright_red", "mudo": "bright_red"}
+_DOT = {"ouvindo": "bright_green", "captei": "bright_yellow", "pensando": "yellow",
+        "fazendo": "yellow", "falando": "bright_cyan", "erro": "bright_red", "mudo": "bright_red"}
 # "humores" da mascote quando ociosa — cicla devagar (sensação de vida)
 _MOODS = ["bright_cyan", "bright_green", "bright_magenta", "cyan",
           "spring_green1", "sky_blue1", "light_pink1", "pale_turquoise1"]
@@ -52,6 +52,8 @@ def _mascot(status: str, frame: int, muted: bool) -> list[str]:
         eye = "    ▬▬▬     ▬▬▬"
     elif status == "erro":
         eye = "    ███     ███"
+    elif status == "captei":        # acordou — olhos arregalados, pulsam
+        eye = ["  ██████   ██████", "   █████   █████", "    ████    ████"][(f // 3) % 3]
     elif blink:
         eye = "    ▀▀▀     ▀▀▀"
     elif status == "pensando":
@@ -65,6 +67,8 @@ def _mascot(status: str, frame: int, muted: bool) -> list[str]:
         mouth = "      ▄▄▄▄▄▄▄"
     elif status == "erro":
         mouth = "      ▀▀▀▀▀▀▀"
+    elif status == "captei":        # sorriso empolgado — pisca entre dois estados
+        mouth = ["     ▀▄████▄▀ ", "     ▀██████▀ "][(f // 4) % 2]
     elif status == "fazendo":       # mastigando (trabalhando)
         mouth = ["      ▄█▄█▄█▄", "      █▄█▄█▄█", "      ▄▄█▄█▄▄"][(f // 2) % 3]
     elif status == "falando":       # abrindo/fechando (falando de verdade)
@@ -418,16 +422,23 @@ class CallUI:
         # quando mudo E ociosa (nada acontecendo) — aí sim "cara de mudo".
         mascot_muted = self.muted and not working
         # borda PULSANDO (amarelo escuro<->claro) enquanto pensa/faz — "tá acontecendo algo"
+        # borda PULSANDO DOURADO ao captar wake word — "te ouvi"
         border = color
         if self._status in ("pensando", "fazendo"):
             b = 0.40 + 0.60 * (0.5 + 0.5 * math.sin(self._frame * 0.30))  # ciclo ~1.5s
             v = max(0, min(255, int(b * 255)))
             border = f"#{v:02x}{v:02x}00"
+        elif self._status == "captei":
+            b = 0.55 + 0.45 * (0.5 + 0.5 * math.sin(self._frame * 0.55))  # pulsa mais rápido
+            v = max(0, min(255, int(b * 255)))
+            border = f"#{v:02x}{int(v * 0.75):02x}00"   # dourado (r alto, g 75%, b=0)
         # cor da mascote: mudo = apagada (cinza, "desligada"); pulsa ao pensar/fazer;
-        # cicla "humores" quando ociosa; status nos outros
+        # captei = dourado brilhante; cicla "humores" quando ociosa; status nos outros
         if mascot_muted:
             mascot_color = "grey50"
         elif self._status in ("pensando", "fazendo"):
+            mascot_color = border
+        elif self._status == "captei":
             mascot_color = border
         elif self._status == "ouvindo" and not self.muted:
             mascot_color = _MOODS[(self._frame // 45) % len(_MOODS)]

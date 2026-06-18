@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 _DIR = Path("/System/Library/Sounds")
-_MAP = {"heard": "Pop.aiff", "on": "Hero.aiff", "off": "Bottle.aiff", "done": "Tink.aiff"}
+_MAP = {"heard": "Pop.aiff", "wake": "Ping.aiff", "on": "Hero.aiff", "off": "Bottle.aiff", "done": "Tink.aiff"}
 _ON = os.getenv("CALL_SOUNDS", "1") not in ("0", "false", "no")
 
 
