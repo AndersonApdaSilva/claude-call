@@ -4,10 +4,14 @@ Teclas:
   M / espaço  mutar (para de ouvir)
   I           interromper a fala dele AGORA
   C           abre/fecha o painel de CONFIG
+  V           cola clipboard no buffer de staging (imagem ou texto)
+  ↵ Enter     envia tudo do buffer de staging de uma vez
   + / -       sensibilidade do mic (VAD) — ao vivo (menos ruido <-> ouve mais)
   [ / ]       trocar dispositivo de entrada (mic) — aplica no proximo start
   B           barge-in por voz on/off (interromper falando; precisa fone/AEC)
 
+Cola múltiplos itens (V, V, V…) e só envia ao pressionar ENTER.
+Cada imagem salva com nome único (/tmp/claude-call-clip-N.png) — sem sobrescrever.
 VAD muda ao vivo (set_params). Mic e barge-in sao persistidos no .env.
 """
 import re
@@ -138,6 +142,8 @@ class Controls:
         self.barge_in = False
         self.typing = False
         self.buf = ""
+        self._staged: list[tuple[str, str]] = []  # ("image"|"text", value)
+        self._clip_counter = 0
         self._sync_ui()
 
     def handle(self, s: str):
@@ -148,6 +154,9 @@ class Controls:
             self._command(ch)
 
     def _command(self, ch: str):
+        if ch in ("\r", "\n"):
+            self.flush_staged()
+            return
         if ch in (" ", "m", "M"):
             self.ui.toggle_mute()
         elif ch in ("i", "I"):
@@ -213,13 +222,11 @@ class Controls:
             logger.error(f"[controls] send_text: {e}")
 
     def paste(self):
-        """Cola o clipboard. Se for IMAGEM, salva PNG e manda o caminho pra Claudinha ler;
-        senão cola o TEXTO."""
+        """Cola o clipboard no buffer de staging. ENTER envia tudo junto."""
         img = self._clip_image()
         if img:
-            self.send_text(f"Colei uma imagem pra você analisar, lê o arquivo: {img}")
-            if self.ui:
-                self.ui.hint(f"📋 imagem colada → {img}")
+            self._staged.append(("image", img))
+            self._show_staged_hint()
             return
         try:
             import subprocess
@@ -229,16 +236,55 @@ class Controls:
             return
         txt = " ".join(txt.split())
         if txt:
-            self.send_text(txt)
-            if self.ui:
-                self.ui.hint(f"📋 colado: {txt[:60]}{'…' if len(txt) > 60 else ''}")
+            self._staged.append(("text", txt))
+            self._show_staged_hint()
         elif self.ui:
             self.ui.hint("clipboard vazio")
 
+    def _show_staged_hint(self):
+        if not self.ui:
+            return
+        imgs = sum(1 for t, _ in self._staged if t == "image")
+        txts = sum(1 for t, _ in self._staged if t == "text")
+        parts = []
+        if imgs:
+            parts.append(f"{imgs} imagem{'ns' if imgs > 1 else ''}")
+        if txts:
+            parts.append(f"{txts} texto{'s' if txts > 1 else ''}")
+        self.ui.hint(f"📋 buffer: {', '.join(parts)} — ↵ pra enviar, V pra adicionar mais")
+
+    def flush_staged(self):
+        """Envia tudo que está no buffer de staging de uma vez."""
+        if not self._staged:
+            return
+        staged = self._staged[:]
+        self._staged.clear()
+
+        imgs = [v for t, v in staged if t == "image"]
+        txts = [v for t, v in staged if t == "text"]
+
+        parts = []
+        if imgs:
+            img_list = ", ".join(imgs)
+            label = "imagens" if len(imgs) > 1 else "imagem"
+            parts.append(f"Colei {len(imgs)} {label} pra você analisar. "
+                         f"Lê {'os arquivos' if len(imgs) > 1 else 'o arquivo'}: {img_list}")
+        if txts:
+            parts.append("Texto colado:\n" + "\n\n".join(txts))
+
+        message = "\n\n".join(parts)
+        self.send_text(message)
+        if self.ui:
+            summary = f"{len(imgs)}img + {len(txts)}txt" if imgs and txts else \
+                      (f"{len(imgs)} imagem" + ("ns" if len(imgs) > 1 else "") if imgs
+                       else f"{len(txts)} texto" + ("s" if len(txts) > 1 else ""))
+            self.ui.hint(f"📤 enviado: {summary}")
+
     def _clip_image(self):
-        """Se o clipboard tem imagem, grava PNG e retorna o caminho (macOS). Senão None."""
+        """Se o clipboard tem imagem, grava PNG com nome único e retorna o caminho (macOS)."""
         import subprocess
-        path = "/tmp/claude-call-clip.png"
+        self._clip_counter += 1
+        path = f"/tmp/claude-call-clip-{self._clip_counter}.png"
         script = ("try\n"
                   " set thePng to (the clipboard as «class PNGf»)\n"
                   f" set fp to open for access POSIX file \"{path}\" with write permission\n"
