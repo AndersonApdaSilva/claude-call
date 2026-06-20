@@ -15,7 +15,7 @@ Not a generic voice assistant. `claude-call` is voice I/O bolted onto **your act
   🔊 speaker ◀─ edge-tts ◀──────────────── streamed reply (sentence by sentence)
 ```
 
-- **Local ears**: whisper.cpp, offline, ~0.6s/utterance (resident server).
+- **Local ears (or API)**: whisper.cpp by default — offline, ~0.6s/utterance (resident server). Or switch to a cloud STT (Groq, OpenAI, ElevenLabs, Google Chirp 2) for top accuracy — see [Speech-to-text](#speech-to-text-local-or-api).
 - **Your brain**: the `claude` CLI you're already logged into — no separate API key to manage, all your skills/MCP/context. (It does cost — headless usage is billed; see [Cost & billing](#cost--billing).)
 - **Free voice**: Microsoft edge-tts, many languages — or plug a premium API (ElevenLabs, Cartesia, OpenAI, Rime, Deepgram) if you want.
 - **One warm process**: the brain runs as a persistent daemon for the whole call — context stays cached, replies stream as it talks.
@@ -44,6 +44,8 @@ So **a voice call costs real money** (API token rates) out of that credit. You d
 - `CALL_CONTINUE=0` — start a fresh session instead of resuming a big one (far fewer input tokens per turn). You lose "continue your session," but it's much cheaper.
 - Fewer, longer calls amortize the prompt cache (warm turns cost less than many cold starts).
 - Want predictable pay-as-you-go instead? Put `ANTHROPIC_API_KEY=...` in `.env` and `claude -p` bills that directly (no agent-credit cap/stop).
+
+> **💸 Want it on your flat plan? Use hook mode.** `voice_hook.py` runs the voice loop as a **`Stop` hook on your live, interactive Claude Code session** — no headless `claude -p`. Those turns are **interactive usage covered by your flat Pro/Max plan**, not the separate agent credit. You drive the voice loop from inside a normal `claude` session instead of launching `call.sh`. See [Hook mode](#hook-mode-run-on-your-flat-plan).
 
 Sources: [Anthropic ends flat-rate agent access, June 15 2026](https://www.techtimes.com/articles/317625/20260602/anthropic-ends-subscription-subsidy-agents-june-15-credit-pool-replaces-flat-rate-access.htm) · [Use Claude Code with Pro/Max](https://support.claude.com/en/articles/11145838-use-claude-code-with-your-pro-or-max-plan).
 
@@ -132,6 +134,28 @@ It writes your choices to `.env`. Prefer doing it by hand? Every setting is a pl
 | `CALL_ECHO_GATE` | `1` | Mute mic while it speaks (use on speakers). `0` = barge-in (use headphones). |
 | `CALL_AEC` | `0` | macOS hardware echo cancellation → barge-in without headphones (see below). |
 | `CALL_PERMISSION` | `--dangerously-skip-permissions` | See **Security**. |
+| `CALL_STT` | `local` | Speech-to-text engine: `local` (whisper.cpp) or an API provider — `groq`, `openai`, `elevenlabs`, `google` (see [Speech-to-text](#speech-to-text-local-or-api)). |
+| `CALL_STT_API_KEY` | *(empty)* | Key for the API STT provider (or use the provider's own env var, e.g. `GROQ_API_KEY`). |
+| `CALL_STT_MODEL` | per-provider | Override the STT model id (e.g. `whisper-large-v3-turbo`). |
+| `CALL_TTS_MODEL` | per-provider | Override the TTS model id (premium providers). |
+| `CALL_NAME` | `Claudinho` | What the agent calls itself / the wake name. |
+| `CALL_SYSTEM` | per-lang | Override the spoken-style system rules (custom persona/instructions). |
+| `CALL_UI` | `1` | Live terminal panel (transcript, state, levels). `0` = off. |
+| `CALL_SOUNDS` | `1` | Sound cues (listening / thinking / wake). `0` = silent. |
+| `CALL_HOTKEY` | `f9` | Push-to-talk key. |
+| `CALL_HOTKEY_SECS` | `3` | Hold window for the hotkey. |
+| `CALL_CODE_MODEL` | `opus` | Brain model for the agent (alias `opus` = Opus 4.8). |
+| `CALL_CODE_EFFORT` | `xhigh` | Reasoning effort for the brain (`low`/`medium`/`high`/`xhigh`). |
+| `CALL_EFFORT` | *(empty)* | Per-turn effort override (voice favors `medium` for speed). |
+| `CALL_IDLE_TIMEOUT` | `1800` | Seconds idle before the call auto-ends. |
+| `CALL_TURN_TIMEOUT` | `120` | Watchdog: max seconds for a full turn. |
+| `CALL_FIRST_RESP_TIMEOUT` | `75` | Watchdog: max seconds to first response. |
+| `CALL_ECHO_TAIL` | `0.8` | Seconds the mic stays muted after it finishes speaking. |
+| `CALL_VAD_CONFIDENCE` | `0.5` | Turn detector sensitivity (lower = hears more). |
+| `CALL_VAD_START_SECS` | `0.2` | Noise filter — ignore blips shorter than this. |
+| `CALL_VAD_STOP_SECS` | `1.0` | Silence to decide you're done (anti-cutoff). |
+| `CALL_VAD_MIN_VOLUME` | `0.2` | Minimum volume counted as speech. |
+| `CALL_GOOGLE_PROJECT` / `CALL_GOOGLE_LOCATION` | *(empty)* | For `CALL_STT=google` (Chirp 2) — GCP project/region; auth via `gcloud` ADC, no key. |
 
 _Full list (STT model & port, greeting, active window, premium keys) is in [`.env.example`](.env.example)._
 
@@ -155,9 +179,38 @@ CALL_VOICE=<a voice id from the provider>
 ```
 Your key lives only in your local `.env`. No key = it just uses free edge-tts.
 
+## Speech-to-text (local or API)
+By default the ears are **local** — whisper.cpp, offline, free, fast. If you want SOTA accuracy (especially for accents or noisy rooms) you can route STT to a cloud provider:
+
+| `CALL_STT` | Provider | Key (env) | Default model |
+|---|---|---|---|
+| `local` | whisper.cpp (default, offline) | — | your ggml model |
+| `groq` | Groq Whisper — very fast | `GROQ_API_KEY` | `whisper-large-v3-turbo` |
+| `openai` | OpenAI transcription | `OPENAI_API_KEY` | `gpt-4o-mini-transcribe` |
+| `elevenlabs` | ElevenLabs Scribe | `ELEVENLABS_API_KEY` | `scribe_v1` |
+| `google` | Google Cloud STT v2 (Chirp 2) — strong for PT | `gcloud` ADC (no key) | `chirp_2` |
+
+```bash
+CALL_STT=groq
+CALL_STT_API_KEY=gsk_...        # or set GROQ_API_KEY
+# CALL_STT_MODEL=...            # optional override
+```
+For Google, auth via `gcloud` Application Default Credentials and set `CALL_GOOGLE_PROJECT` / `CALL_GOOGLE_LOCATION` — no API key. No setting = it stays fully local.
+
 ## Modes
 - **Call mode** (default): open mic, no wake word — just talk, like a phone call.
-- **Assistant mode**: set `CALL_WAKE=claude` so it only answers when addressed (good for always-on in the background).
+- **Assistant mode**: set `CALL_WAKE=claudinha` so it only answers when addressed (good for always-on in the background).
+- **Hook mode** (flat-plan): voice loop runs on your **live interactive** session — see below.
+
+## Hook mode (run on your flat plan)
+`call.sh` launches a headless `claude -p` brain (billed from the separate agent credit — see [Cost & billing](#cost--billing)). If you'd rather stay on your flat Pro/Max plan, use **`voice_hook.py`** instead: it wires the voice loop as a **`Stop` hook** on a normal, interactive `claude` session.
+
+How it works: on each turn-stop, the hook speaks the assistant's last message (edge-tts), records the mic until you go quiet, transcribes it (whisper), and feeds your words back as the next turn of the **same live session** — so those turns count as **interactive usage on your flat plan**, not headless. Toggle it with the flag file `~/.claude-call-active`; say a stop word (`encerrar`, `tchau`, `desliga`, `end call`) to let the turn stop normally.
+
+## Live panel & push-to-talk
+- **`CALL_UI=1`** (default): a live terminal panel shows the running transcript, current state (listening / thinking / speaking) and audio levels. `CALL_UI=0` to disable.
+- **`CALL_SOUNDS=1`** (default): subtle cues for listening / thinking / wake. `0` for silence.
+- **`CALL_HOTKEY=f9`**: push-to-talk key (held for `CALL_HOTKEY_SECS`), handy in noisy rooms or when you want explicit control over the mic.
 
 ## Echo / headphones
 Without headphones the mic hears the agent's own voice and loops. Three options:
@@ -192,7 +245,7 @@ Hands-free voice can't answer permission prompts, so the default `CALL_PERMISSIO
 The brain is **not** a daemon that "thinks" continuously. LLMs are stateless: every spoken turn triggers one fresh inference over your conversation, run on Anthropic's servers — exactly what happens when you type in Claude Code. `claude-call` keeps **one `claude` process alive** for the call (stream-json in/out, `--resume <your session>`), so context stays warm and replies stream — but it's a warm, persistent *session*, not a continuous consciousness. (One catch: typing in Claude Code is covered by your flat plan, but the headless `claude -p` this uses is billed separately — see [Cost & billing](#cost--billing).)
 
 ## Files
-`call.py` (pipeline) · `brain.py` (claude daemon) · `stt.py` (whisper-server/cli) · `tts.py` (edge-tts + premium providers) · `echo_gate.py` · `session.py` (finds your session) · `config.py` · `configure.py` (settings menu) · `doctor.py` (setup check + benchmark) · `install.sh` · `aec_bridge.swift` + `extras_mac_aec.py` (optional macOS AEC).
+`call.py` (pipeline) · `brain.py` (claude daemon) · `voice_hook.py` (Stop-hook flat-plan mode) · `stt.py` (whisper-server/cli + API providers) · `tts.py` (edge-tts + premium providers) · `echo_gate.py` · `audio_meter.py` (levels) · `ui.py` (live panel) · `controls.py` · `hotkey.py` (push-to-talk) · `sounds.py` (audio cues) · `session.py` (finds your session) · `config.py` · `configure.py` (settings menu) · `doctor.py` (setup check + benchmark) · `install.sh` · `aec_bridge.swift` + `extras_mac_aec.py` (optional macOS AEC).
 
 ## Credits
 Built on [Pipecat](https://github.com/pipecat-ai/pipecat), [whisper.cpp](https://github.com/ggerganov/whisper.cpp), [edge-tts](https://github.com/rany2/edge-tts), and [Claude Code](https://docs.claude.com/claude-code).
