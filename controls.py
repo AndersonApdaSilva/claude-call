@@ -44,7 +44,7 @@ _RESET_KEYS = ("CALL_VAD_CONFIDENCE", "CALL_VAD_MIN_VOLUME", "CALL_VAD_STOP_SECS
 
 
 # dispositivos virtuais (sem áudio real) — nunca usar/ciclar nesses
-_VIRTUAL = ("blackhole", "aggregate", "multi-output", "soundflower", "loopback", "quicktime")
+_VIRTUAL = ("blackhole", "aggregate", "multi-output", "soundflower", "loopback", "quicktime", "cam link", "camlink", "elgato", "iphone", "ipad")
 
 
 def _is_virtual(name: str) -> bool:

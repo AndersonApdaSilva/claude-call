@@ -119,8 +119,10 @@ async def main():
 
     # Transport
     use_echo_gate = C.ECHO_GATE
-    from controls import builtin_mic_index
-    input_dev = builtin_mic_index()   # SEMPRE o mic do Mac (built-in), sem seletor
+    from controls import builtin_mic_index, resolve_device
+    # Mic por NOME (CALL_INPUT_DEVICE) — estavel a mudanca de indice / iPhone Continuity.
+    # Sem nome -> mic built-in/computador. (Mac Mini c/ Scarlett: setar CALL_INPUT_DEVICE.)
+    input_dev = resolve_device(C.INPUT_DEVICE_NAME) if C.INPUT_DEVICE_NAME else builtin_mic_index()
     if C.AEC:
         from extras_mac_aec import MacAECTransport  # opcional, so macOS
         transport = MacAECTransport()
