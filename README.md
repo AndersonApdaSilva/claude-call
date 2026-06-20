@@ -138,7 +138,7 @@ It writes your choices to `.env`. Prefer doing it by hand? Every setting is a pl
 | `CALL_STT_API_KEY` | *(empty)* | Key for the API STT provider (or use the provider's own env var, e.g. `GROQ_API_KEY`). |
 | `CALL_STT_MODEL` | per-provider | Override the STT model id (e.g. `whisper-large-v3-turbo`). |
 | `CALL_TTS_MODEL` | per-provider | Override the TTS model id (premium providers). |
-| `CALL_NAME` | `Claudinho` | What the agent calls itself / the wake name. |
+| `CALL_NAME` | `Claude` | What the agent calls itself / the wake name. |
 | `CALL_SYSTEM` | per-lang | Override the spoken-style system rules (custom persona/instructions). |
 | `CALL_UI` | `1` | Live terminal panel (transcript, state, levels). `0` = off. |
 | `CALL_SOUNDS` | `1` | Sound cues (listening / thinking / wake). `0` = silent. |

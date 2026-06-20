@@ -89,7 +89,7 @@ def _mascot(status: str, frame: int, muted: bool) -> list[str]:
 
 
 class CallUI:
-    def __init__(self, *, session_id, cwd, lang="pt", name="Claudinho", max_actions=6):
+    def __init__(self, *, session_id, cwd, lang="pt", name="Claude", max_actions=6):
         self._cwd = cwd
         self._session_id = session_id
         self._lang = (lang or "pt")[:2]

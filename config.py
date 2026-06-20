@@ -14,7 +14,7 @@ SAMPLE_RATE_OUT = 24000   # edge-tts
 LANG = os.getenv("CALL_LANG", "en")
 
 # Nome/persona do assistente (aparece no painel e na saudacao).
-NAME = os.getenv("CALL_NAME", "Claudinho")
+NAME = os.getenv("CALL_NAME", "Claude")
 
 # Voz default por idioma (edge-tts). Sobrescreva com CALL_VOICE.
 _DEFAULT_VOICE = {
