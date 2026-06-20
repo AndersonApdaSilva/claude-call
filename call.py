@@ -109,6 +109,10 @@ async def main():
     # Feedback visual (painel ao vivo). Em terminal real, manda os logs pro arquivo
     # pra nao sujar o painel; sem TTY (background) a UI se desliga e os logs ficam.
     ui = CallUI(session_id=session_id, cwd=C.CWD, lang=C.LANG, name=C.NAME) if C.UI else None
+
+    # Transcript da call (sempre on — independe do painel): transcripts/<data>.md
+    from transcript import Transcript
+    transcript = Transcript(name=C.NAME, session_id=session_id or "", lang=C.LANG, cwd=C.CWD)
     if ui and ui.enabled:
         # loguru -> arquivo (terminal limpo pro painel). NAO mexer em sys.stderr: trocar
         # o fd quebra o signal wakeup fd do asyncio e TRAVA a leitura do subprocess.
@@ -157,6 +161,7 @@ async def main():
         first_resp_timeout=C.FIRST_RESP_TIMEOUT, stall_timeout=C.TURN_TIMEOUT,
         recover_phrase=_RECOVER.get(C.LANG[:2], _RECOVER["en"]),
         ui=ui,
+        transcript=transcript,
     )
 
     try:
@@ -230,6 +235,9 @@ async def main():
                 pass
         if ui:
             ui.stop()
+        transcript.close()
+        if transcript.path:
+            logger.info(f"transcript salvo: {transcript.path}")
 
 
 if __name__ == "__main__":

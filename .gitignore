@@ -5,3 +5,4 @@ __pycache__/
 logs/
 aecbridge
 .DS_Store
+transcripts/

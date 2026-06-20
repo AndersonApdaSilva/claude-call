@@ -149,9 +149,12 @@ class ClaudeBrain(FrameProcessor):
         stall_timeout: float = 120.0,
         recover_phrase: str = "Sorry, I got stuck — please say that again.",
         ui=None,
+        transcript=None,
     ):
         super().__init__()
         self._ui = ui
+        self._transcript = transcript    # grava a conversa por call (transcripts/<data>.md)
+        self._turn_reply = ""            # acumula a resposta falada do turno atual
         self._voice_rules = voice_rules
         self._cwd = cwd or os.getcwd()
         # Dois modos: chat (voz, rapido) e code (programar, forte). Troca on-the-fly.
@@ -280,6 +283,9 @@ class ClaudeBrain(FrameProcessor):
         play("heard")           # bip: captei sua fala, vou executar
         if self._ui:
             self._ui.heard(text)
+        if self._transcript:
+            self._transcript.user(text)
+        self._turn_reply = ""
         self._buf = ""
         self._discard = False
         self._narrated_tool = False
@@ -359,6 +365,7 @@ class ClaudeBrain(FrameProcessor):
                             for s in sents:
                                 if await self._say(s):
                                     self._spoke = True
+                                    self._turn_reply += s + " "
                                     if self._ui:
                                         self._ui.reply_append(s)
 
@@ -389,10 +396,13 @@ class ClaudeBrain(FrameProcessor):
                     tail = self._buf.strip()
                     if not self._discard and await self._say(self._buf):
                         self._spoke = True
+                        self._turn_reply += tail + " "
                         if self._ui and tail:
                             self._ui.reply_append(tail)
                     self._buf = ""
                     self._active_until = time.monotonic() + self._active_window
+                    if self._transcript and self._turn_reply.strip():
+                        self._transcript.assistant(self._turn_reply)
                     if self._ui:
                         self._ui.done()
             # stdout fechou: daemon saiu. Se foi NO MEIO de um turno, não deixa travado —
