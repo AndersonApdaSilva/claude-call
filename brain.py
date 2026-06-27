@@ -96,9 +96,9 @@ def _fuzzy_wake(word: str, wake: str) -> bool:
     """True se 'word' é provável mishear da wake word (sem deps externas).
 
     Cobre:
-      - substring direto:  "audinha"  ⊆ "claudinha"  ✓
-      - sufixo fonético:   "odinha"   → ends with "dinha" = wake[-5:]  ✓
-    Rejeita palavras comuns: "galinha", "vizinha", "rainha" → False
+      - substring direto:  "claud"  ⊆ "claude"  ✓
+      - sufixo fonético:   termina como o fim da wake (wake[-min_suf:])  ✓
+    Rejeita palavras comuns que só rimam (ex.: "fraude" p/ "claude") → False
     """
     w = word.strip(",.!?:;-—").lower()
     if not w or len(w) < 4:
@@ -642,8 +642,8 @@ class ClaudeBrain(FrameProcessor):
             if not self._should_answer(text):
                 logger.debug(f"[brain] gated (sem '{'/'.join(self._wake)}'): {text!r}")
                 return
-            # disse a wake word -> tira ela do pedido (é só gatilho). Se só disse "claudinha"
-            # (sem comando), abre a janela ativa pro próximo turno não precisar repetir.
+            # disse a wake word -> tira ela do pedido (é só gatilho). Se só disse o nome
+            # (ex.: "claude", sem comando), abre a janela ativa pro próximo turno não repetir.
             if self._wake and self._has_wake(text):
                 text = self._strip_wake(text)
                 if self._ui:

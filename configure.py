@@ -29,7 +29,8 @@ DEFAULTS = {
     "CALL_MODEL": "",
     "CALL_ECHO_GATE": "1",
     "CALL_AEC": "0",
-    "CALL_WAKE": "",
+    "CALL_NAME": "Claude",
+    "CALL_WAKE": "claude",
     "CALL_GREETING": "",
 }
 
@@ -71,6 +72,7 @@ def load() -> dict:
     cfg = dict(DEFAULTS)
     src = ENV if ENV.exists() else EXAMPLE
     extra = {}
+    seen = set()
     if src.exists():
         for line in src.read_text(encoding="utf-8").splitlines():
             line = line.strip()
@@ -80,6 +82,10 @@ def load() -> dict:
             k = k.strip()
             v = re.split(r"\s+#", v, 1)[0].strip()  # drop inline comments
             (cfg if k in DEFAULTS else extra)[k] = v
+            seen.add(k)
+    # A ativacao acompanha o nome quando nao foi fixada explicitamente (mesmo default do runtime).
+    if "CALL_WAKE" not in seen:
+        cfg["CALL_WAKE"] = (cfg.get("CALL_NAME") or "Claude").lower()
     cfg["_extra"] = extra
     return cfg
 
@@ -261,26 +267,42 @@ def edit_echo(cfg):
         cfg["CALL_AEC"] = "1"
 
 
+def edit_name(cfg):
+    old = cfg.get("CALL_NAME") or "Claude"
+    n = ask(f"  assistant name [{old}]: ") or old
+    cfg["CALL_NAME"] = n
+    # A ativacao usa o nome por padrao: se o wake ainda era o nome antigo, acompanha o novo.
+    if cfg.get("CALL_WAKE") and cfg["CALL_WAKE"].strip().lower() == old.strip().lower():
+        cfg["CALL_WAKE"] = n.lower()
+
+
 def edit_activation(cfg):
-    print("\n  Activation:  1) Open mic (call mode)   2) Wake word (assistant mode)")
+    name = cfg.get("CALL_NAME") or "Claude"
+    cur = cfg.get("CALL_WAKE")
+    print(f"\n  Activation (current: {'open mic' if not cur else 'wake: ' + cur})")
+    print(f"  1) Wake word — say its name to address it (default: \"{name.lower()}\")")
+    print("  2) Open mic (call mode) — no wake word, just talk")
     sel = ask("  choose [1-2]: ")
     if sel == "1":
-        cfg["CALL_WAKE"] = ""
+        w = ask(f"  wake word [{name.lower()}]: ")
+        cfg["CALL_WAKE"] = w or name.lower()
     elif sel == "2":
-        w = ask("  wake word (e.g. claude): ")
-        cfg["CALL_WAKE"] = w or "claude"
+        cfg["CALL_WAKE"] = ""
 
 
 def _summary(cfg):
     echo = "speakers" if cfg["CALL_ECHO_GATE"] == "1" and cfg["CALL_AEC"] == "0" else \
            "AEC" if cfg["CALL_AEC"] == "1" else "headphones"
-    act = "open mic" if not cfg["CALL_WAKE"] else f"wake: {cfg['CALL_WAKE']}"
+    act = ("open mic" if cfg["CALL_WAKE"].strip().lower() in ("", "off", "none", "0", "false", "no")
+           else f"wake: {cfg['CALL_WAKE']}")
     style = next((l for k, (l, p) in STYLES.items() if p == cfg["CALL_SYSTEM"]), "custom") \
         if cfg["CALL_SYSTEM"] else "natural"
     prov = cfg.get("CALL_TTS", "edge")
     voice = _voice(cfg) if prov == "edge" else (cfg.get("CALL_VOICE") or f"{prov} default")
-    return (f"lang={cfg['CALL_LANG']}  tts={prov}  voice={voice}  rate={cfg['CALL_VOICE_RATE']}  "
-            f"style={style}  model={cfg['CALL_MODEL'] or 'default'}  audio={echo}  {act}")
+    name = cfg.get("CALL_NAME") or "Claude"
+    return (f"name={name}  lang={cfg['CALL_LANG']}  tts={prov}  voice={voice}  "
+            f"rate={cfg['CALL_VOICE_RATE']}  style={style}  "
+            f"model={cfg['CALL_MODEL'] or 'default'}  audio={echo}  {act}")
 
 
 def main():
@@ -288,13 +310,14 @@ def main():
     actions = {
         "1": edit_language, "2": edit_provider, "3": edit_voice, "4": edit_rate,
         "5": edit_style, "6": edit_model, "7": edit_echo, "8": edit_activation,
+        "9": edit_name,
     }
     while True:
         print("\n" + "═" * 64)
         print("  claude-call · config")
         print("  " + _summary(cfg))
         print("═" * 64)
-        print("  1) Language          5) Style")
+        print("  1) Language          5) Style          9) Name")
         print("  2) Voice provider    6) Brain model")
         print("  3) Voice             7) Audio / echo")
         print("  4) Speaking rate     8) Activation")

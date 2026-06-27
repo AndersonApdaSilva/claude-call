@@ -128,7 +128,7 @@ Go into a project you've used with Claude Code, and run it:
 cd ~/my-project
 claude-call          # or:  /path/to/claude-call/call.sh
 ```
-It greets you, **resumes that project's most recent Claude Code session**, and listens. Talk normally; pause ~1s when you finish a sentence (that's the turn detector deciding you're done). `Ctrl+C` ends the call.
+It greets you, **resumes that project's most recent Claude Code session**, and listens. By default you address it by name — say "**Claude**, …" and pause ~1s when you finish (that's the turn detector deciding you're done). Want a pure open mic (no wake word)? Set `CALL_WAKE=off`. `Ctrl+C` ends the call.
 
 The first run downloads a small Silero model and warms the whisper server. The first spoken turn loads your session context (slower; cached after that).
 
@@ -157,7 +157,7 @@ It writes your choices to `.env`. Prefer doing it by hand? Every setting is a pl
 | `CALL_MODEL` | your default | `opus` / `sonnet` / `haiku`. Bigger = smarter & slower. |
 | `CALL_CONTINUE` | `1` | Resume your most recent Claude Code session in `CALL_CWD`. |
 | `CALL_CWD` | where you ran it | Which project's session to resume. |
-| `CALL_WAKE` | *(empty)* | Empty = open mic (call mode). Set e.g. `claude` to require a wake word (assistant mode). |
+| `CALL_WAKE` | *(your name, e.g. `claude`)* | Activation word — say it to address the agent (assistant mode). Defaults to `CALL_NAME` lowercased. `off` (or empty) = open mic (call mode). |
 | `CALL_ECHO_GATE` | `1` | Mute mic while it speaks (use on speakers). `0` = barge-in (use headphones). |
 | `CALL_AEC` | `0` | macOS hardware echo cancellation → barge-in without headphones (see below). |
 | `CALL_PERMISSION` | `--dangerously-skip-permissions` | See **Security**. |
@@ -165,7 +165,7 @@ It writes your choices to `.env`. Prefer doing it by hand? Every setting is a pl
 | `CALL_STT_API_KEY` | *(empty)* | Key for the API STT provider (or use the provider's own env var, e.g. `GROQ_API_KEY`). |
 | `CALL_STT_MODEL` | per-provider | Override the STT model id (e.g. `whisper-large-v3-turbo`). |
 | `CALL_TTS_MODEL` | per-provider | Override the TTS model id (premium providers). |
-| `CALL_NAME` | `Claude` | What the agent calls itself / the wake name. |
+| `CALL_NAME` | `Claude` | What the agent calls itself / the activation word (the default `CALL_WAKE`). Change it in `claude-call config` → **Name**. |
 | `CALL_SYSTEM` | per-lang | Override the spoken-style system rules (custom persona/instructions). |
 | `CALL_UI` | `1` | Live terminal panel (transcript, state, levels). `0` = off. |
 | `CALL_SOUNDS` | `1` | Sound cues (listening / thinking / wake). `0` = silent. |
@@ -225,8 +225,8 @@ CALL_STT_API_KEY=gsk_...        # or set GROQ_API_KEY
 For Google, auth via `gcloud` Application Default Credentials and set `CALL_GOOGLE_PROJECT` / `CALL_GOOGLE_LOCATION` — no API key. No setting = it stays fully local.
 
 ## Modes
-- **Call mode** (default): open mic, no wake word — just talk, like a phone call.
-- **Assistant mode**: set `CALL_WAKE=claudinha` so it only answers when addressed (good for always-on in the background).
+- **Assistant mode** (default): address it by name — say "**Claude**" (or whatever you set as `CALL_NAME`) so it only acts when called (good for always-on in the background). Rename it in `claude-call config` → **Name**, or with `CALL_WAKE=jarvis`.
+- **Call mode**: open mic, no wake word — just talk, like a phone call. Set `CALL_WAKE=off`.
 - **Hook mode** (flat-plan): voice loop runs on your **live interactive** session — see below.
 
 ## Hook mode (run on your flat plan)

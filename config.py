@@ -64,10 +64,10 @@ CONTINUE = os.getenv("CALL_CONTINUE", "1") not in ("0", "false", "no")
 SESSION_ID = os.getenv("CALL_SESSION_ID") or None
 CWD = os.getenv("CALL_CWD") or os.getcwd()
 
-# Ativacao por wake word. DEFAULT: precisa dizer "claudinha" pra ele ouvir/executar — sem
-# o wake, nao transcreve/executa (so loga gated). Desabilita (mic sempre aberto, modo call)
-# com CALL_WAKE=off (ou vazio/none/0). Multiplos: "claudinha,claudina".
-_WAKE_RAW = os.getenv("CALL_WAKE", "claudinha")
+# Ativacao: por padrao voce chama o assistente pelo NOME dele (CALL_NAME, ex.: "claude")
+# pra ele ouvir/executar — sem o wake nao transcreve/executa (so loga gated). Mic sempre
+# aberto (modo call) com CALL_WAKE=off (ou vazio/none/0). Multiplos: "claude,claudio".
+_WAKE_RAW = os.getenv("CALL_WAKE", NAME.lower())
 WAKE = ([] if _WAKE_RAW.strip().lower() in ("", "off", "none", "0", "false", "no")
         else [w.strip().lower() for w in _WAKE_RAW.split(",") if w.strip()])
 ACTIVE_WINDOW = float(os.getenv("CALL_ACTIVE_WINDOW", "25"))
