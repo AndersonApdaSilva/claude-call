@@ -78,6 +78,7 @@ claude-call          # config:  claude-call config   ·   check:  claude-call do
 
 Notes for Windows:
 - **Entry points are PowerShell**: `call.ps1` / `install.ps1` (the `.sh` scripts are macOS/Linux). `install.ps1` drops a `claude-call.cmd` shim into your scoop shims dir (already on `PATH`).
+- **Use the native Claude Code installer** (gives `claude.exe`). claude-call launches the `claude` CLI directly (not through a shell), and on Windows that only finds `claude.exe` — an npm install exposes `claude.cmd`, which won't be picked up. Either install the native build or make sure a `claude.exe` is on `PATH`.
 - **Python 3.12** is fetched automatically by `uv` (3.13+ removed `audioop`). PyAudio installs from a prebuilt wheel — no portaudio build needed.
 - **STT speed**: the scoop whisper.cpp is a CPU build. If `small` feels slow on your machine, switch to a lighter model: `.\scripts\download-model.ps1 base` then set `CALL_WHISPER_MODEL=%USERPROFILE%\.cache\whisper\ggml-base.bin` in `.env`.
 - **Ctrl+C** ends the call (the macOS hardware AEC / `CALL_AEC` is macOS-only and simply ignored here).
