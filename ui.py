@@ -304,8 +304,11 @@ class CallUI:
             self.error("aba só no macOS")
             return False
         feed = str(WORK_FILE)   # mostra o Claude PROGRAMANDO (tool/input/resultado), nao o resumo
-        cmd = (f"clear; echo '{self.name} — Claude Code ao vivo (programando)'; "
-               f"echo '(sessao {self._session_id or '?'})'; echo; tail -n +1 -f '{feed}'")
+        # sanitiza o que vai interpolado no osascript (nome/sessão com aspas quebrariam)
+        safe_name = re.sub(r"""["'\\]""", "", self.name or "")
+        safe_sid = re.sub(r"""["'\\]""", "", str(self._session_id or "?"))
+        cmd = (f"clear; echo '{safe_name} — Claude Code ao vivo (programando)'; "
+               f"echo '(sessao {safe_sid})'; echo; tail -n +1 -f '{feed}'")
         term = os.environ.get("TERM_PROGRAM", "")
 
         iterm = (f'tell application "iTerm"\n'

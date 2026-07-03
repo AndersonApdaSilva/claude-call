@@ -59,7 +59,9 @@ async def _speak(text: str):
         return
     import tempfile, subprocess
     mp3 = bytearray()
-    async for c in edge_tts.Communicate(clean, C.VOICE, rate=C.VOICE_RATE).stream():
+    # sempre voz edge: C.VOICE pode ser um voice id de provider premium (ElevenLabs...)
+    voice = C.VOICE if C.TTS == "edge" else C.EDGE_VOICE
+    async for c in edge_tts.Communicate(clean, voice, rate=C.VOICE_RATE).stream():
         if c["type"] == "audio":
             mp3.extend(c["data"])
     f = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False); f.write(mp3); f.close()

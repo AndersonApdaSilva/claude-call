@@ -95,6 +95,32 @@ async def main():
     except Exception as e:  # noqa: BLE001
         bad(f"Silero VAD failed: {e}")
 
+    head("Microphone")
+    # A falha nº 1 de campo é permissão de mic negada / device errado — testa DE VERDADE:
+    # abre o mic ~0.7s e mede o pico. (No macOS isso também dispara o prompt de permissão
+    # já no doctor, em vez de na primeira call.)
+    try:
+        import warnings as _w
+        with _w.catch_warnings():
+            _w.simplefilter("ignore", DeprecationWarning)
+            import audioop as _audioop
+        import pyaudio
+        pa = pyaudio.PyAudio()
+        st = pa.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True,
+                     frames_per_buffer=1024)
+        peak = 0
+        for _ in range(int(16000 / 1024 * 0.7)):
+            peak = max(peak, _audioop.rms(st.read(1024, exception_on_overflow=False), 2))
+        st.stop_stream(); st.close(); pa.terminate()
+        if peak > 30:
+            ok(f"mic capturing (peak RMS {peak})")
+        else:
+            warn("mic opened but captured only silence — check the input device and the "
+                 "OS microphone permission for your terminal")
+    except Exception as e:  # noqa: BLE001
+        bad(f"mic capture failed: {e} — grant microphone permission to your terminal "
+            "(macOS: System Settings → Privacy & Security → Microphone)")
+
     head("Benchmarks")
     pcm = bytearray()
     try:

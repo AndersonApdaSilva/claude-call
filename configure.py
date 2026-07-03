@@ -32,6 +32,17 @@ DEFAULTS = {
     "CALL_NAME": "Claude",
     "CALL_WAKE": "claude",
     "CALL_GREETING": "",
+    "CALL_STT": "local",
+    "CALL_STT_API_KEY": "",
+}
+
+# STT (ouvidos): local = whisper.cpp (gratis, offline). APIs = melhor qualidade (chave).
+STT_PROVIDERS = {
+    "local":      ("whisper.cpp local — free, offline (default)", ""),
+    "groq":       ("Groq whisper-large-v3-turbo — fast & cheap", "https://console.groq.com"),
+    "openai":     ("OpenAI gpt-4o-mini-transcribe", "https://platform.openai.com"),
+    "elevenlabs": ("ElevenLabs Scribe — top accuracy", "https://elevenlabs.io"),
+    "google":     ("Google Chirp 2 — SOTA for PT (gcloud ADC, no key)", "auth via `gcloud auth application-default login`"),
 }
 
 # provider -> (human label, where to get a key / voices)
@@ -267,6 +278,24 @@ def edit_echo(cfg):
         cfg["CALL_AEC"] = "1"
 
 
+def edit_stt(cfg):
+    cur = cfg.get("CALL_STT") or "local"
+    print(f"\n  Hearing (STT)  ·  current: {cur}")
+    keys = list(STT_PROVIDERS)
+    for i, k in enumerate(keys, 1):
+        label, hint = STT_PROVIDERS[k]
+        print(f"  {i}) {label}" + (f"   ({hint})" if hint else ""))
+    sel = ask(f"  choose [1-{len(keys)}]: ")
+    if not sel or not sel.isdigit() or not (1 <= int(sel) <= len(keys)):
+        return
+    prov = keys[int(sel) - 1]
+    cfg["CALL_STT"] = prov
+    if prov not in ("local", "google"):
+        k = ask("  API key (blank = use the provider's standard env var): ")
+        if k:
+            cfg["CALL_STT_API_KEY"] = k
+
+
 def edit_name(cfg):
     old = cfg.get("CALL_NAME") or "Claude"
     n = ask(f"  assistant name [{old}]: ") or old
@@ -300,7 +329,8 @@ def _summary(cfg):
     prov = cfg.get("CALL_TTS", "edge")
     voice = _voice(cfg) if prov == "edge" else (cfg.get("CALL_VOICE") or f"{prov} default")
     name = cfg.get("CALL_NAME") or "Claude"
-    return (f"name={name}  lang={cfg['CALL_LANG']}  tts={prov}  voice={voice}  "
+    stt = cfg.get("CALL_STT") or "local"
+    return (f"name={name}  lang={cfg['CALL_LANG']}  stt={stt}  tts={prov}  voice={voice}  "
             f"rate={cfg['CALL_VOICE_RATE']}  style={style}  "
             f"model={cfg['CALL_MODEL'] or 'default'}  audio={echo}  {act}")
 
@@ -310,15 +340,15 @@ def main():
     actions = {
         "1": edit_language, "2": edit_provider, "3": edit_voice, "4": edit_rate,
         "5": edit_style, "6": edit_model, "7": edit_echo, "8": edit_activation,
-        "9": edit_name,
+        "9": edit_name, "10": edit_stt,
     }
     while True:
         print("\n" + "═" * 64)
         print("  claude-call · config")
         print("  " + _summary(cfg))
         print("═" * 64)
-        print("  1) Language          5) Style          9) Name")
-        print("  2) Voice provider    6) Brain model")
+        print("  1) Language          5) Style          9)  Name")
+        print("  2) Voice provider    6) Brain model    10) Hearing (STT)")
         print("  3) Voice             7) Audio / echo")
         print("  4) Speaking rate     8) Activation")
         print("  s) Save & exit       q) Quit without saving")

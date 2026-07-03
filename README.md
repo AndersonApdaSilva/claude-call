@@ -7,7 +7,7 @@
 Not a generic voice assistant. `claude-call` is voice I/O bolted onto **your actual Claude Code session** — same skills, MCP servers, memory, and context. You launch it from a project, it *resumes the conversation you were just having there*, and you keep going by voice. It can read files, run tools, edit code, post to your integrations — everything your Claude Code can do — because the brain **is** your Claude Code.
 
 ```
-  🎙️ mic ─▶ VAD (Silero + Smart Turn) ─▶ whisper.cpp (local STT)
+  🎙️ mic ─▶ VAD (Silero) ─▶ whisper.cpp (local STT)
                                               │
                                               ▼
                          claude (daemon, --resume your session)   ◀── the brain IS your Claude Code
@@ -175,7 +175,8 @@ It writes your choices to `.env`. Prefer doing it by hand? Every setting is a pl
 | `CALL_CODE_EFFORT` | `xhigh` | Reasoning effort for the brain (`low`/`medium`/`high`/`xhigh`). |
 | `CALL_EFFORT` | *(empty)* | Per-turn effort override (voice favors `medium` for speed). |
 | `CALL_IDLE_TIMEOUT` | `1800` | Seconds idle before the call auto-ends. |
-| `CALL_TURN_TIMEOUT` | `120` | Watchdog: max seconds for a full turn. |
+| `CALL_TURN_TIMEOUT` | `120` | Watchdog: max seconds stalled mid-turn. |
+| `CALL_TOOL_TIMEOUT` | `600` | Watchdog ceiling while a tool (Bash/Task) is running — long builds aren't stalls. |
 | `CALL_FIRST_RESP_TIMEOUT` | `75` | Watchdog: max seconds to first response. |
 | `CALL_ECHO_TAIL` | `0.8` | Seconds the mic stays muted after it finishes speaking. |
 | `CALL_VAD_CONFIDENCE` | `0.5` | Turn detector sensitivity (lower = hears more). |

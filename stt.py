@@ -101,6 +101,11 @@ class WhisperServerSTT(SegmentedSTTService):
         await self.start_ttfb_metrics()
         wav = _wav(_to_16k(audio, self.sample_rate or WHISPER_RATE))
         try:
+            # NOTA: testamos response_format=verbose_json + filtro por no_speech_prob
+            # (o clássico anti-alucinação) e ficou PIOR neste server: no silêncio, o
+            # caminho json+no_timestamps retorna "" e o verbose_json alucina com
+            # no_speech_prob ~0 (alem de JSON invalido intermitente). Mantido o formato
+            # que na prática suprime melhor.
             resp = await self._client.post(
                 self._url,
                 files={"file": ("a.wav", wav, "audio/wav")},
