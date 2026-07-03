@@ -1,0 +1,31 @@
+# CI: testes das funções puras + checagem de sintaxe, nos 3 SOs suportados.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: System deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -y && sudo apt-get install -y portaudio19-dev
+      - name: System deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install portaudio
+      - name: Install
+        run: uv sync
+      - name: Lint (erros de sintaxe/nome apenas)
+        run: uv run ruff check --select E9,F63,F7,F82 .
+      - name: Tests
+        run: uv run pytest -q
