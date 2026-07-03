@@ -4,12 +4,19 @@ Pipecat nao traz edge-tts embutido, entao implementamos um TTSService:
 edge-tts gera MP3 -> ffmpeg decodifica pra PCM s16le mono -> frames de audio raw.
 """
 import asyncio
+import hashlib
 import importlib
 import os
+from pathlib import Path
 from typing import AsyncGenerator
 
 import edge_tts
 from loguru import logger
+
+# Cache de PCM pra frases CURTAS e repetidas (fillers 'Peraí', greeting): TTFB ~0ms em
+# vez de um RTT do edge-tts — exatamente no momento cuja função é mascarar latência.
+_CACHE_DIR = Path.home() / ".cache" / "claude-call" / "tts"
+_CACHE_MAX_CHARS = 80
 
 from pipecat.frames.frames import (
     ErrorFrame, Frame, TTSAudioRawFrame, TTSStartedFrame, TTSStoppedFrame,
@@ -30,11 +37,32 @@ class EdgeTTS(TTSService):
     def can_generate_metrics(self) -> bool:
         return False
 
+    def _cache_path(self, text: str) -> Path:
+        key = f"{self._voice}|{self._rate}|{self._pitch}|{self.sample_rate}|{text}"
+        return _CACHE_DIR / (hashlib.sha1(key.encode()).hexdigest() + ".pcm")
+
     async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
         """Streaming: feed edge-tts mp3 into ffmpeg as it arrives, emit PCM as it
         decodes — first audio starts in ~hundreds of ms instead of after the whole
-        sentence is generated. `-f mp3` skips format probing so ffmpeg starts at once."""
+        sentence is generated. `-f mp3` skips format probing so ffmpeg starts at once.
+        Frases curtas repetidas (fillers/greeting) saem do cache em disco: TTFB ~0ms."""
         logger.debug(f"[edge-tts] {text!r}")
+        frame_bytes = int(self.sample_rate * 0.02) * 2  # ~20ms
+        cacheable = len(text) <= _CACHE_MAX_CHARS
+        if cacheable:
+            cp = self._cache_path(text)
+            if cp.exists():
+                try:
+                    pcm = cp.read_bytes()
+                except OSError:
+                    pcm = b""
+                if pcm:
+                    yield TTSStartedFrame()
+                    for i in range(0, len(pcm), frame_bytes):
+                        yield TTSAudioRawFrame(audio=pcm[i:i + frame_bytes],
+                                               sample_rate=self.sample_rate, num_channels=1)
+                    yield TTSStoppedFrame()
+                    return
         try:
             proc = await asyncio.create_subprocess_exec(
                 "ffmpeg", "-hide_banner", "-loglevel", "error",
@@ -66,14 +94,16 @@ class EdgeTTS(TTSService):
         feeder = asyncio.create_task(feed())
         await self.start_ttfb_metrics()
         yield TTSStartedFrame()
-        frame_bytes = int(self.sample_rate * 0.02) * 2  # ~20ms
         got = False
+        pcm_out = bytearray() if cacheable else None
         try:
             while True:
                 data = await proc.stdout.read(frame_bytes)
                 if not data:
                     break
                 got = True
+                if pcm_out is not None:
+                    pcm_out.extend(data)
                 yield TTSAudioRawFrame(audio=data, sample_rate=self.sample_rate, num_channels=1)
         finally:
             if not feeder.done():
@@ -85,7 +115,32 @@ class EdgeTTS(TTSService):
                     pass
         if not got:
             yield ErrorFrame("edge-tts produced no audio")
+        elif pcm_out:
+            try:   # grava atômico (tmp + rename) pra próxima vez sair do cache
+                _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                tmp = cp.with_suffix(f".{os.getpid()}.tmp")
+                tmp.write_bytes(bytes(pcm_out))
+                tmp.replace(cp)
+            except OSError:
+                pass
         yield TTSStoppedFrame()
+
+
+async def prewarm_edge_cache(texts, *, voice: str, rate: str, sample_rate: int):
+    """Sintetiza (em background, no startup) as frases fixas — fillers e greeting — pra
+    já estarem no cache quando a call precisar delas. Falha silenciosa (sem rede etc.)."""
+    svc = EdgeTTS(voice=voice, rate=rate, sample_rate=sample_rate)
+    # fora da pipeline o sample_rate só é aplicado no StartFrame — seta direto
+    # (mesmo truque do doctor), senão frame_bytes=0 e sai "no audio" silencioso.
+    svc._sample_rate = sample_rate
+    for t in texts:
+        if not t or len(t) > _CACHE_MAX_CHARS or svc._cache_path(t).exists():
+            continue
+        try:
+            async for _ in svc.run_tts(t, "prewarm"):
+                pass
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[tts] prewarm {t!r}: {e}")
 
 
 # ---------------------------------------------------------------- providers
