@@ -335,10 +335,10 @@ class Controls:
             self.ui.set_typing(True, self.buf)
 
     def interrupt(self):
-        """Para a fala dele AGORA (flush do TTS via InterruptionTaskFrame)."""
-        self.brain._discard = True
-        self.brain._buf = ""
+        """Para AGORA: o turno do daemon (geração+tools, via control_request) E a fala
+        (flush do TTS via InterruptionTaskFrame)."""
         try:
+            self.loop.create_task(self.brain.interrupt_turn())
             self.loop.create_task(
                 self.task.queue_frame(InterruptionTaskFrame(), FrameDirection.UPSTREAM))
         except Exception as e:  # noqa: BLE001

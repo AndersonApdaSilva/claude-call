@@ -46,6 +46,10 @@ _GREETING = {
     "en": f"Hey, it's {NAME}. What's up?",
     "pt": f"Oi, aqui é o {NAME}. Pode falar.",
     "es": f"Hola, soy {NAME}. Dime.",
+    "fr": f"Salut, c'est {NAME}. Je t'écoute.",
+    "de": f"Hey, hier ist {NAME}. Was gibt's?",
+    "it": f"Ciao, sono {NAME}. Dimmi.",
+    "ja": f"もしもし、{NAME}です。どうぞ。",
 }
 GREETING = os.getenv("CALL_GREETING") or _GREETING.get(LANG[:2], _GREETING["en"])
 
@@ -77,6 +81,8 @@ ACTIVE_WINDOW = float(os.getenv("CALL_ACTIVE_WINDOW", "25"))
 # TURN = s travado depois de já ter respondido (tool/stall longo; acima do timeout do Bash).
 FIRST_RESP_TIMEOUT = float(os.getenv("CALL_FIRST_RESP_TIMEOUT", "75"))
 TURN_TIMEOUT = float(os.getenv("CALL_TURN_TIMEOUT", "120"))
+# Teto quando uma TOOL esta rodando (Bash/Task pode levar minutos sem emitir nada).
+TOOL_TIMEOUT = float(os.getenv("CALL_TOOL_TIMEOUT", "600"))
 
 # Anti-eco
 ECHO_GATE = os.getenv("CALL_ECHO_GATE", "1") not in ("0", "false", "no")

@@ -1,7 +1,7 @@
 """claude-call — uma ligacao de voz com o seu Claude Code.
 
 Pipeline (Pipecat):
-  mic -> [EchoGate] -> VAD (Silero+SmartTurn) -> whisper (STT local)
+  mic -> [EchoGate] -> VAD (Silero) -> whisper (STT local)
       -> ClaudeBrain (daemon `claude` retomando a SUA sessao) -> edge-tts -> alto-falante
 
 Cerebro = `claude` CLI ja autenticado (sua assinatura). Nao precisa de API key.
@@ -159,7 +159,9 @@ async def main():
         fillers=_FILLERS.get(C.LANG[:2], _FILLERS["en"]),
         session_id=session_id, cwd=C.CWD,
         first_resp_timeout=C.FIRST_RESP_TIMEOUT, stall_timeout=C.TURN_TIMEOUT,
+        tool_timeout=C.TOOL_TIMEOUT,
         recover_phrase=_RECOVER.get(C.LANG[:2], _RECOVER["en"]),
+        lang=C.LANG,
         ui=ui,
         transcript=transcript,
     )
@@ -173,6 +175,15 @@ async def main():
         logger.warning(f"TTS '{C.TTS}' unavailable ({e}); falling back to free edge-tts")
         tts = make_tts(provider="edge", voice=C.EDGE_VOICE, rate=C.VOICE_RATE,
                        sample_rate=C.SAMPLE_RATE_OUT)
+
+    # Pre-aquece o cache de TTS das frases FIXAS (fillers + greeting) em background:
+    # o 1o "Peraí." da call sai instantâneo em vez de pagar um RTT do edge-tts.
+    from tts import EdgeTTS, prewarm_edge_cache
+    if isinstance(tts, EdgeTTS):
+        fixed = _FILLERS.get(C.LANG[:2], _FILLERS["en"]) + [C.GREETING]
+        asyncio.create_task(prewarm_edge_cache(
+            fixed, voice=C.VOICE if C.TTS == "edge" else C.EDGE_VOICE,
+            rate=C.VOICE_RATE, sample_rate=C.SAMPLE_RATE_OUT))
 
     stages = [transport.input()]
     if ui and ui.enabled:
