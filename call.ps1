@@ -24,6 +24,22 @@ if ($sub -eq "doctor") {
     uv run --directory $ScriptDir python doctor.py
     exit $LASTEXITCODE
 }
+if ($sub -eq "transcripts") {
+    $dir = Join-Path $ScriptDir "transcripts"
+    $files = @(Get-ChildItem $dir -Filter *.md -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+    if ($files.Count -eq 0) {
+        Write-Host "Nenhum transcript ainda - faca uma call primeiro."
+        exit 0
+    }
+    Write-Host "Transcripts (mais recentes primeiro) em ${dir}:"
+    $files | ForEach-Object { Write-Host ("  " + $_.BaseName) }
+    if ($Args.Count -ge 2 -and $Args[1] -eq "last") {
+        Get-Content $files[0].FullName | more
+    } else {
+        Invoke-Item $dir   # abre a pasta no Explorer
+    }
+    exit 0
+}
 
 # A sessao a retomar = o diretorio de onde voce chamou (NAO a pasta do repo).
 if (-not $env:CALL_CWD) { $env:CALL_CWD = (Get-Location).Path }

@@ -119,7 +119,8 @@ async def main():
                  "OS microphone permission for your terminal")
     except Exception as e:  # noqa: BLE001
         bad(f"mic capture failed: {e} — grant microphone permission to your terminal "
-            "(macOS: System Settings → Privacy & Security → Microphone)")
+            "(macOS: System Settings → Privacy & Security → Microphone · "
+            "Windows: Settings → Privacy & security → Microphone)")
 
     head("Benchmarks")
     pcm = bytearray()

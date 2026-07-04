@@ -222,17 +222,24 @@ class Controls:
             logger.error(f"[controls] send_text: {e}")
 
     def paste(self):
-        """Cola o clipboard no buffer de staging. ENTER envia tudo junto."""
+        """Cola o clipboard no buffer de staging. ENTER envia tudo junto.
+        macOS: pbpaste (texto) + osascript (imagem). Windows: Get-Clipboard (texto)."""
         img = self._clip_image()
         if img:
             self._staged.append(("image", img))
             self._show_staged_hint()
             return
         try:
+            import os
             import subprocess
-            txt = subprocess.run(["pbpaste"], capture_output=True, text=True, timeout=3).stdout
+            if os.name == "nt":
+                txt = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", "Get-Clipboard"],
+                    capture_output=True, text=True, timeout=5).stdout
+            else:
+                txt = subprocess.run(["pbpaste"], capture_output=True, text=True, timeout=3).stdout
         except Exception as e:  # noqa: BLE001
-            logger.error(f"[controls] pbpaste: {e}")
+            logger.error(f"[controls] clipboard: {e}")
             return
         txt = " ".join(txt.split())
         if txt:
@@ -283,6 +290,9 @@ class Controls:
     def _clip_image(self):
         """Se o clipboard tem imagem, grava PNG com nome único e retorna o caminho (macOS)."""
         import subprocess
+        import sys
+        if sys.platform != "darwin":
+            return None
         self._clip_counter += 1
         path = f"/tmp/claude-call-clip-{self._clip_counter}.png"
         script = ("try\n"

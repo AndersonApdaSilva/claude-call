@@ -117,10 +117,10 @@ STT = os.getenv("CALL_STT", "local").lower()
 STT_API_KEY = os.getenv("CALL_STT_API_KEY") or None
 STT_MODEL = os.getenv("CALL_STT_MODEL") or None
 
-# STT local (whisper.cpp)
-WHISPER_MODEL = os.path.expanduser(os.getenv(
+# STT local (whisper.cpp). expandvars: %USERPROFILE% (Windows) e $HOME funcionam no .env.
+WHISPER_MODEL = os.path.expanduser(os.path.expandvars(os.getenv(
     "CALL_WHISPER_MODEL", str(Path.home() / ".cache" / "whisper" / "ggml-small.bin")
-))
+)))
 WHISPER_PORT = int(os.getenv("CALL_WHISPER_PORT", "8099"))
 USE_WHISPER_SERVER = os.getenv("CALL_WHISPER_SERVER", "1") not in ("0", "false", "no")
 

@@ -56,9 +56,42 @@ _RECOVER = {
 
 
 def _setup_keys(handler, loop):
-    """Lê teclas (cbreak + add_reader) e manda pro handler. Mantém ISIG (Ctrl+C ok)."""
+    """Lê teclas e manda pro handler. POSIX: cbreak + add_reader (mantém ISIG/Ctrl+C).
+    Windows: termios não existe e o Proactor loop não tem add_reader — uma thread com
+    msvcrt entrega as teclas via call_soon_threadsafe (mesmas teclas M/I/T/± etc.)."""
     if not sys.stdin.isatty():
         return None
+
+    if os.name == "nt":
+        import msvcrt
+        import threading
+        import time as _time
+        stop = threading.Event()
+
+        def _reader():
+            while not stop.is_set():
+                if not msvcrt.kbhit():
+                    _time.sleep(0.03)
+                    continue
+                try:
+                    ch = msvcrt.getwch()
+                    if ch in ("\x00", "\xe0"):   # tecla especial (setas/F#) vem em par
+                        msvcrt.getwch()
+                        continue
+                except Exception:  # noqa: BLE001
+                    continue
+
+                def _dispatch(c=ch):
+                    try:
+                        handler(c)
+                    except Exception as e:  # noqa: BLE001
+                        logger.error(f"[keys] {e}")
+                loop.call_soon_threadsafe(_dispatch)
+
+        t = threading.Thread(target=_reader, daemon=True)
+        t.start()
+        return ("nt", stop)
+
     import termios
     import tty
     fd = sys.stdin.fileno()
@@ -83,6 +116,9 @@ def _setup_keys(handler, loop):
 
 def _restore_keys(state, loop):
     if not state:
+        return
+    if state[0] == "nt":         # Windows: só para a thread do msvcrt
+        state[1].set()
         return
     fd, old = state
     try:

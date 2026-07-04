@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import importlib
 import os
+import uuid
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -116,9 +117,10 @@ class EdgeTTS(TTSService):
         if not got:
             yield ErrorFrame("edge-tts produced no audio")
         elif pcm_out:
-            try:   # grava atômico (tmp + rename) pra próxima vez sair do cache
+            try:   # grava atômico (tmp único + rename): prewarm e pipeline podem gerar a
+                   # MESMA frase ao mesmo tempo no mesmo processo — pid só não bastaria.
                 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-                tmp = cp.with_suffix(f".{os.getpid()}.tmp")
+                tmp = cp.with_suffix(f".{os.getpid()}.{uuid.uuid4().hex[:6]}.tmp")
                 tmp.write_bytes(bytes(pcm_out))
                 tmp.replace(cp)
             except OSError:
